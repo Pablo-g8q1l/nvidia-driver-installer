@@ -1,1 +1,1 @@
-# Pakiet aplikacji NVIDIA Driver Installer
+# NVIDIA Driver Installer application package

@@ -1,1 +1,1 @@
-# Moduły rdzenia — logika bez GUI
+# Core modules — logic without GUI

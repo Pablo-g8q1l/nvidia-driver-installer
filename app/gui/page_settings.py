@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Strona ustawień — język, motyw oraz informacje o programie."""
+"""Settings page — language, theme and information about the program."""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
@@ -16,7 +16,7 @@ APP_VERSION = "1.0.0"
 
 
 class SettingsPage(QWidget):
-    """Zmiana języka (PL/EN) i motywu (jasny/ciemny) + sekcja O programie."""
+    """Changing the language (PL/EN) and theme (light/dark) + the About section."""
 
     def __init__(self, cfg: dict, parent=None):
         super().__init__(parent)
@@ -31,7 +31,7 @@ class SettingsPage(QWidget):
         form = QFormLayout(box)
         form.setSpacing(12)
 
-        # Język interfejsu
+        # Interface language
         self.combo_lang = QComboBox()
         self.combo_lang.addItem("Polski", "pl")
         self.combo_lang.addItem("English", "en")
@@ -40,7 +40,7 @@ class SettingsPage(QWidget):
         self.combo_lang.currentIndexChanged.connect(self._on_language)
         form.addRow(tr("Język interfejsu:"), self.combo_lang)
 
-        # Motyw graficzny — zmiana natychmiastowa
+        # Graphical theme — applied immediately
         self.combo_theme = QComboBox()
         self.combo_theme.addItem(tr("Ciemny"), "dark")
         self.combo_theme.addItem(tr("Jasny"), "light")
@@ -49,8 +49,8 @@ class SettingsPage(QWidget):
         self.combo_theme.currentIndexChanged.connect(self._on_theme)
         form.addRow(tr("Motyw:"), self.combo_theme)
 
-        # Raport rozruchu — opt-in, domyślnie wyłączony (usługa systemowa
-        # zostaje na komputerze i zapisuje diagnostykę przy każdym starcie)
+        # Boot report — opt-in, disabled by default (the system service stays
+        # on the computer and writes diagnostics on every startup)
         self.chk_report = QCheckBox(
             tr("Zapisuj diagnostykę grafiki po każdym rozruchu")
         )
@@ -68,13 +68,13 @@ class SettingsPage(QWidget):
 
         layout.addWidget(box)
 
-        # Informacja o wymaganym restarcie po zmianie języka
+        # Notice about the restart required after changing the language
         self.lbl_restart = QLabel("")
         self.lbl_restart.setObjectName("dim")
         self.lbl_restart.setWordWrap(True)
         layout.addWidget(self.lbl_restart)
 
-        # O programie
+        # About
         about = QGroupBox(tr("O programie"))
         a_lay = QVBoxLayout(about)
         a_text = QLabel(
@@ -94,7 +94,7 @@ class SettingsPage(QWidget):
         layout.addStretch()
 
     def _on_language(self) -> None:
-        """Zapisuje język; pełna zmiana tekstów wymaga ponownego uruchomienia."""
+        """Saves the language; a full text change requires a restart."""
         self._cfg["language"] = self.combo_lang.currentData()
         config.save_config(self._cfg)
         self.lbl_restart.setText(
@@ -102,13 +102,13 @@ class SettingsPage(QWidget):
         )
 
     def _on_theme(self) -> None:
-        """Motyw zmienia się natychmiast i jest zapisywany na stałe."""
+        """The theme changes immediately and is saved permanently."""
         self._cfg["theme"] = self.combo_theme.currentData()
         config.save_config(self._cfg)
         apply_theme(QApplication.instance(), self._cfg["theme"])
 
     def _on_report(self, checked: bool) -> None:
-        """Raport rozruchu: zapamiętany od razu, zastosuje go najbliższa instalacja."""
+        """Boot report: remembered immediately, applied by the next installation."""
         self._cfg["boot_report"] = bool(checked)
         config.save_config(self._cfg)
         self.lbl_restart.setText(

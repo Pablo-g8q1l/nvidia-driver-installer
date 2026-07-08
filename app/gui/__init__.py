@@ -1,1 +1,1 @@
-# Moduły interfejsu graficznego (PySide6)
+# Graphical user interface modules (PySide6)

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Główne okno programu: pasek boczny z zakładkami + wykrywanie systemu w tle."""
+"""Main program window: sidebar with tabs + background system detection."""
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, QThread, Signal
@@ -19,7 +19,7 @@ from app.i18n import tr
 
 
 class DetectThread(QThread):
-    """Wykrywa dystrybucję, GPU i sterownik w tle, by GUI startowało od razu."""
+    """Detects the distribution, GPU and driver in the background so the GUI starts immediately."""
 
     sig_done = Signal(dict)
 
@@ -32,7 +32,7 @@ class DetectThread(QThread):
 
 
 class MainWindow(QMainWindow):
-    """Okno główne: Instalacja / Monitor / Diagnostyka / Historia / Ustawienia."""
+    """Main window: Installation / Monitor / Diagnostics / History / Settings."""
 
     def __init__(self, cfg: dict, parent=None):
         super().__init__(parent)
@@ -48,7 +48,7 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # --- Pasek boczny -----------------------------------------------------
+        # --- Sidebar ----------------------------------------------------------
         self.sidebar = QListWidget()
         self.sidebar.setObjectName("sidebar")
         self.sidebar.setFixedWidth(210)
@@ -64,7 +64,7 @@ class MainWindow(QMainWindow):
             QListWidgetItem(nazwa, self.sidebar)
         root.addWidget(self.sidebar)
 
-        # --- Prawa część: nagłówek + strony ------------------------------------
+        # --- Right side: header + pages ----------------------------------------
         right = QVBoxLayout()
         right.setContentsMargins(16, 12, 16, 12)
 
@@ -91,12 +91,12 @@ class MainWindow(QMainWindow):
         self.sidebar.currentRowChanged.connect(self.pages.setCurrentIndex)
         self.sidebar.setCurrentRow(0)
 
-        # Po udanej instalacji odświeżamy informacje o systemie
+        # After a successful installation we refresh the system information
         self.page_install.sig_system_changed.connect(self._start_detection)
 
         self.statusBar().showMessage(tr("Wykrywanie systemu..."))
 
-    # ------------------------------------------------------------- wykrywanie
+    # ------------------------------------------------------------- detection
     def _start_detection(self) -> None:
         self._detect_thread = DetectThread(self)
         self._detect_thread.sig_done.connect(self._on_detected)
@@ -109,8 +109,8 @@ class MainWindow(QMainWindow):
         gpu_txt = gpus[0].name if gpus else tr("brak karty NVIDIA")
         self.statusBar().showMessage(f"{distro.name}  |  {gpu_txt}")
 
-    # ------------------------------------------------------------- zamykanie
-    def closeEvent(self, event) -> None:  # noqa: N802 — API Qt
-        """Zatrzymuje wątek monitora przed zamknięciem okna."""
+    # ------------------------------------------------------------- closing
+    def closeEvent(self, event) -> None:  # noqa: N802 — Qt API
+        """Stops the monitor thread before the window closes."""
         self.page_monitor.stop_monitor()
         super().closeEvent(event)

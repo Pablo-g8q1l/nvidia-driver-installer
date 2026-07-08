@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Strona instalacji sterownika — wybór metody, opcji i przebieg instalacji."""
+"""Driver installation page — method and option selection and the install flow."""
 from __future__ import annotations
 
 import os
@@ -19,26 +19,18 @@ from app.core.gpu import (
 )
 from app.core.installer import InstallOptions, InstallThread
 from app.core.utils import is_linux, which
-from app.i18n import tr
+from app.i18n import tr, tr_prefix
 
 
 def _tr_step(label: str) -> str:
-    """Tłumaczy etykietę kroku instalacji.
-
-    Etykiety z dynamiczną końcówką w nawiasie (np. nazwą pakietu sterownika,
-    której nie ma w słowniku) tłumaczone są po samym przedrostku.
-    """
-    t = tr(label)
-    if t == label and label.endswith(")") and " (" in label:
-        prefix, _, rest = label.rpartition(" (")
-        return tr(prefix) + f" ({rest}"
-    return t
+    """Translates an installation step label (delegates to i18n.tr_prefix)."""
+    return tr_prefix(label)
 
 
 class VersionThread(QThread):
-    """Pobiera w tle dostępne wersje sterowników (internet + repozytorium)."""
+    """Fetches available driver versions in the background (internet + repository)."""
 
-    # wersje .run, wersje z repozytorium, wersja Mesy (dla metody NVK)
+    # .run versions, repository versions, Mesa version (for the NVK method)
     sig_versions = Signal(dict, list, str)
 
     def __init__(self, distro, parent=None):
@@ -55,14 +47,14 @@ class VersionThread(QThread):
 
 
 class InstallPage(QWidget):
-    """Główna strona programu: wykryty system + w pełni automatyczna instalacja."""
+    """The program's main page: detected system + fully automatic installation."""
 
-    sig_system_changed = Signal()  # po instalacji — główne okno odświeża wykrywanie
+    sig_system_changed = Signal()  # after install — the main window refreshes detection
 
     def __init__(self, cfg: dict | None = None, parent=None):
         super().__init__(parent)
-        self._cfg = cfg if cfg is not None else {}  # ustawienia programu (m.in. boot_report)
-        self._state: dict = {}          # wynik wykrywania z main_window
+        self._cfg = cfg if cfg is not None else {}  # program settings (incl. boot_report)
+        self._state: dict = {}          # detection result from main_window
         self._install_thread = None
         self._version_thread = None
         self._build_ui()
@@ -72,13 +64,13 @@ class InstallPage(QWidget):
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
-        # --- Wykryty system -------------------------------------------------
+        # --- Detected system ------------------------------------------------
         box_sys = QGroupBox(tr("Wykryty system"))
         sys_lay = QVBoxLayout(box_sys)
         self.lbl_distro = QLabel(tr("Dystrybucja: wykrywanie..."))
         self.lbl_gpu = QLabel(tr("Karta graficzna: wykrywanie..."))
         self.lbl_driver = QLabel(tr("Obecny sterownik: wykrywanie..."))
-        # Jądro znane od razu (os.uname), bez wykrywania w tle
+        # The kernel is known immediately (os.uname), without background detection
         kernel = os.uname().release if is_linux() else "—"
         self.lbl_kernel = QLabel(f"{tr('Uruchomione jądro')}: {kernel}")
         for lbl in (self.lbl_distro, self.lbl_gpu, self.lbl_driver,
@@ -86,7 +78,7 @@ class InstallPage(QWidget):
             sys_lay.addWidget(lbl)
         layout.addWidget(box_sys)
 
-        # --- Metoda instalacji ----------------------------------------------
+        # --- Installation method --------------------------------------------
         box_method = QGroupBox(tr("Metoda instalacji"))
         m_lay = QVBoxLayout(box_method)
         self.rb_repo = QRadioButton(tr("Repozytorium dystrybucji (zalecane)"))
@@ -100,7 +92,7 @@ class InstallPage(QWidget):
             rb.toggled.connect(self._update_method_widgets)
 
         def _method_frame(radio: QRadioButton, sub_row: QHBoxLayout) -> QFrame:
-            """Ramka jednej metody — podświetlana, gdy metoda jest wybrana."""
+            """Frame for a single method — highlighted when the method is selected."""
             frame = QFrame()
             frame.setObjectName("methodRow")
             frame.setProperty("selected", False)
@@ -111,7 +103,7 @@ class InstallPage(QWidget):
             f_lay.addLayout(sub_row)
             return frame
 
-        # Repozytorium: wykryta wersja / wybór pakietu (Kubuntu/Mint)
+        # Repository: detected version / package selection (Kubuntu/Mint)
         repo_row = QHBoxLayout()
         repo_row.addSpacing(24)
         self.lbl_repo_info = QLabel(tr("Sprawdzanie dostępnej wersji..."))
@@ -119,8 +111,8 @@ class InstallPage(QWidget):
         self.combo_repo = QComboBox()
         self.combo_repo.setVisible(False)
         self.combo_repo.setMinimumWidth(280)
-        # Na czystym Debianie lista wybiera źródło (Debian / repo NVIDIA),
-        # od którego zależy dostępność otwartych modułów jądra
+        # On plain Debian the list selects the source (Debian / NVIDIA repo),
+        # which determines the availability of open kernel modules
         self.combo_repo.currentIndexChanged.connect(self._update_open_checkbox)
         repo_row.addWidget(self.lbl_repo_info)
         repo_row.addWidget(self.combo_repo)
@@ -128,7 +120,7 @@ class InstallPage(QWidget):
         self._frame_repo = _method_frame(self.rb_repo, repo_row)
         m_lay.addWidget(self._frame_repo)
 
-        # Plik .run: wybór gałęzi (Production / New Feature / Beta / Legacy)
+        # .run file: branch selection (Production / New Feature / Beta / Legacy)
         run_row = QHBoxLayout()
         run_row.addSpacing(24)
         self.combo_run = QComboBox()
@@ -156,21 +148,21 @@ class InstallPage(QWidget):
         self._frame_nvk = _method_frame(self.rb_nvk, nvk_row)
         m_lay.addWidget(self._frame_nvk)
 
-        # Otwarte moduły jądra
+        # Open kernel modules
         self.chk_open = QCheckBox(
             tr("Otwarte moduły jądra (open kernel modules) — RTX 20xx i nowsze")
         )
         m_lay.addWidget(self.chk_open)
         layout.addWidget(box_method)
 
-        # --- Przycisk instalacji ---------------------------------------------
+        # --- Install button --------------------------------------------------
         self.btn_install = QPushButton(tr("ZAINSTALUJ STEROWNIK"))
         self.btn_install.setObjectName("primary")
         self.btn_install.setMinimumHeight(48)
         self.btn_install.clicked.connect(self._start_install)
         layout.addWidget(self.btn_install)
 
-        # --- Postęp i log ------------------------------------------------------
+        # --- Progress and log --------------------------------------------------
         self.lbl_step = QLabel("")
         self.lbl_step.setObjectName("dim")
         layout.addWidget(self.lbl_step)
@@ -187,9 +179,9 @@ class InstallPage(QWidget):
 
         self._update_method_widgets()
 
-    # ------------------------------------------------------ stan systemu
+    # ------------------------------------------------------ system state
     def set_system_state(self, state: dict) -> None:
-        """Aktualizuje stronę po wykryciu systemu (wywołuje main_window)."""
+        """Updates the page after system detection (called by main_window)."""
         self._state = state
         distro = state.get("distro")
         gpus = state.get("gpus", [])
@@ -212,7 +204,7 @@ class InstallPage(QWidget):
             f"{tr('Obecny sterownik')}: {driver_description(driver)}"
         )
 
-        # Instalacja możliwa tylko na obsługiwanym Linuksie z kartą NVIDIA
+        # Installation is possible only on a supported Linux with an NVIDIA card
         can_install = bool(distro and distro.supported and is_linux())
         self.btn_install.setEnabled(can_install)
         if not is_linux():
@@ -220,8 +212,8 @@ class InstallPage(QWidget):
                 tr("Tryb podglądu — instalacja dostępna tylko na Linuksie.")
             )
 
-        # Domyślnie zaznaczona metoda odpowiadająca sterownikowi obecnemu
-        # w systemie; gdy sterownika nie ma — zostaje zalecane repozytorium
+        # The method selected by default matches the driver currently on the
+        # system; when there is no driver — the recommended repository stays
         typ = driver.get("typ", "")
         if typ == "nouveau":
             self.rb_nvk.setChecked(True)
@@ -231,12 +223,12 @@ class InstallPage(QWidget):
             else:
                 self.rb_repo.setChecked(True)
 
-        # Domyślny stan checkboxa otwartych modułów zależnie od GPU
+        # Default state of the open-modules checkbox depending on the GPU
         turing = any(is_turing_or_newer(g.name) for g in gpus)
         self.chk_open.setChecked(turing)
 
-        # NVK na czystym Debianie z RTX 50xx wymaga backportów — informacja
-        # przy metodzie, żeby nowe jądro nie było niespodzianką
+        # NVK on plain Debian with RTX 50xx requires backports — a note by the
+        # method so that the new kernel isn't a surprise
         opis_nvk = tr(
             "Bez komponentów NVIDIA, pełne wsparcie Wayland. Najlepiej działa"
             " na kartach RTX 20xx i nowszych."
@@ -246,38 +238,39 @@ class InstallPage(QWidget):
                 "Na RTX 50xx program zainstaluje nowsze jądro, Mesę i firmware"
                 " z oficjalnych backportów Debiana."
             )
-        self._opis_nvk = opis_nvk  # baza — wersja Mesy dojdzie po pobraniu
+        self._opis_nvk = opis_nvk  # base — the Mesa version is added after fetching
         self.lbl_nvk.setText(opis_nvk)
         self._update_method_widgets()
 
-        # Pobranie dostępnych wersji w tle
+        # Fetch the available versions in the background
         self._version_thread = VersionThread(distro, self)
         self._version_thread.sig_versions.connect(self._on_versions)
         self._version_thread.start()
 
-    # ------------------------------------------------------ wersje sterownika
+    # ------------------------------------------------------ driver versions
     def _on_versions(self, run_versions: dict, repo_versions: list,
                      mesa_version: str = "") -> None:
-        """Wypełnia listy wersji po pobraniu danych w tle.
+        """Fills the version lists after the data has been fetched in the background.
 
-        Dodatkowo dobiera zalecaną gałąź do architektury wykrytej karty:
-        oznacza ją gwiazdką, ustawia jako domyślną i ostrzega przy gałęziach,
-        które karty nie obsługują (np. najnowszy sterownik a karta Kepler).
+        It also matches the recommended branch to the detected card's
+        architecture: marks it with a star, sets it as the default and warns
+        about branches the card doesn't support (e.g. the latest driver vs a
+        Kepler card).
         """
-        # Wersja Mesy przy opisie metody NVK (odpowiednik wersji przy repo/run)
+        # Mesa version next to the NVK method description (like the version for repo/run)
         if mesa_version:
             self.lbl_nvk.setText(
                 getattr(self, "_opis_nvk", self.lbl_nvk.text())
                 + f"\n{tr('Wykryta wersja:')} Mesa {mesa_version}"
             )
         gpus = self._state.get("gpus", [])
-        # Rekomendacja liczona dla pierwszej karty (najczęstszy przypadek)
+        # The recommendation is computed for the first card (the most common case)
         rec = (
             recommended_driver_info(gpus[0].name) if gpus
             else {"arch": "", "legacy": None, "max_major": None}
         )
 
-        # Gałęzie .run
+        # .run branches
         self.combo_run.clear()
         rec_index = -1
         branches = [
@@ -295,10 +288,10 @@ class InstallPage(QWidget):
                 major = 0
             text = f"{label} — {ver}"
             if rec["legacy"]:
-                # Stara karta — nowe gałęzie jej nie obsługują
+                # Old card — new branches don't support it
                 text += "  ⚠ " + tr("(nie obsługuje Twojej karty)")
             elif rec["max_major"] and major > rec["max_major"]:
-                # Np. Maxwell/Pascal: gałęzie nowsze niż 580 mogą nie wspierać
+                # E.g. Maxwell/Pascal: branches newer than 580 may not support it
                 text += "  ⚠ " + tr("(może nie wspierać Twojej karty)")
             elif gpus and key == "production" and rec_index < 0:
                 text += "  ★ " + tr("(zalecana dla Twojej karty)")
@@ -319,18 +312,18 @@ class InstallPage(QWidget):
                 tr("(brak internetu — wersje zapasowe)"), ""
             )
 
-        # Informacja o wykrytej architekturze obok listy gałęzi
-        # (nazwy własne jak Kepler/Fermi tr() przepuszcza bez zmian)
+        # Info about the detected architecture next to the branch list
+        # (proper names like Kepler/Fermi are passed through by tr() unchanged)
         if rec["arch"]:
             self.lbl_run_warn.setText(
                 tr("Architektura karty:") + f" {tr(rec['arch'])}"
             )
 
-        # Repozytorium
+        # Repository
         distro = self._state.get("distro")
         if repo_versions:
             if distro and distro.ubuntu_based and len(repo_versions) > 1:
-                # Kubuntu / Mint: użytkownik wybiera serię sterownika z listy
+                # Kubuntu / Mint: the user selects the driver series from the list
                 self.lbl_repo_info.setText(tr("Dostępne wersje:"))
                 self.combo_repo.setVisible(True)
                 self.combo_repo.clear()
@@ -344,9 +337,9 @@ class InstallPage(QWidget):
             elif (
                 distro and distro.family == "debian" and len(repo_versions) > 1
             ):
-                # Czysty Debian: wybór źródła pakietów. Repo Debiana kończy
-                # się na serii 550, więc dla RTX 50xx zalecane (i konieczne)
-                # jest oficjalne repozytorium NVIDIA.
+                # Plain Debian: package source selection. The Debian repo ends
+                # at series 550, so for RTX 50xx the official NVIDIA repository
+                # is recommended (and required).
                 blackwell = any(is_blackwell_or_newer(g.name) for g in gpus)
                 self.lbl_repo_info.setText(tr("Źródło pakietów:"))
                 self.combo_repo.setVisible(True)
@@ -378,7 +371,7 @@ class InstallPage(QWidget):
                 tr("Nie udało się wykryć wersji w repozytorium.")
             )
 
-        # Stara karta: najnowszy sterownik z repozytorium jej nie obsłuży
+        # Old card: the latest driver from the repository won't support it
         if rec["legacy"]:
             self.lbl_repo_info.setText(
                 self.lbl_repo_info.text()
@@ -389,39 +382,39 @@ class InstallPage(QWidget):
                      " z zalecaną wersją.")
             )
 
-    # ------------------------------------------------------ logika opcji
+    # ------------------------------------------------------ option logic
     def _update_method_widgets(self) -> None:
-        """Włącza/wyłącza widżety zależnie od wybranej metody instalacji."""
+        """Enables/disables widgets depending on the selected installation method."""
         self.combo_run.setEnabled(self.rb_run.isChecked())
         self.combo_repo.setEnabled(self.rb_repo.isChecked())
 
-        # Podświetlenie ramki wybranej metody (właściwość czyta arkusz QSS)
+        # Highlight the frame of the selected method (the QSS reads the property)
         for frame, rb in (
             (self._frame_repo, self.rb_repo),
             (self._frame_run, self.rb_run),
             (self._frame_nvk, self.rb_nvk),
         ):
             frame.setProperty("selected", rb.isChecked())
-            # Wymuszenie ponownego nałożenia stylu po zmianie właściwości
+            # Force the style to be re-applied after the property changes
             frame.style().unpolish(frame)
             frame.style().polish(frame)
 
         self._update_open_checkbox()
 
     def _update_open_checkbox(self) -> None:
-        """Reguły dostępności otwartych modułów jądra dla bieżącej metody."""
+        """Availability rules for open kernel modules for the current method."""
         gpus = self._state.get("gpus", [])
         distro = self._state.get("distro")
         turing = any(is_turing_or_newer(g.name) for g in gpus)
 
         if self.rb_nvk.isChecked():
-            # NVK sam w sobie jest otwarty — checkbox nie ma zastosowania
+            # NVK is open by itself — the checkbox doesn't apply
             self.chk_open.setEnabled(False)
             self.chk_open.setToolTip(tr("NVK jest w całości open source."))
             return
         if any(is_blackwell_or_newer(g.name) for g in gpus):
-            # Blackwell (RTX 50xx+) działa wyłącznie z modułami otwartymi —
-            # zamknięte moduły nie obsługują tych kart, więc wymuszamy wybór
+            # Blackwell (RTX 50xx+) works only with open modules —
+            # proprietary modules don't support these cards, so we force the choice
             self.chk_open.setEnabled(False)
             self.chk_open.setChecked(True)
             self.chk_open.setToolTip(
@@ -443,8 +436,8 @@ class InstallPage(QWidget):
             and not distro.ubuntu_based
             and self.combo_repo.currentData() != "nvidia"
         ):
-            # Repozytorium Debiana nie ma prostego wariantu open —
-            # ma go dopiero oficjalne repozytorium NVIDIA (nvidia-open)
+            # The Debian repository has no simple open variant —
+            # only the official NVIDIA repository has it (nvidia-open)
             self.chk_open.setEnabled(False)
             self.chk_open.setChecked(False)
             self.chk_open.setToolTip(
@@ -453,7 +446,7 @@ class InstallPage(QWidget):
             )
             return
         if self.rb_run.isChecked():
-            # Stare gałęzie (Legacy < 515) nie mają modułów otwartych
+            # Old branches (Legacy < 515) have no open modules
             ver = self.combo_run.currentData() or ""
             if ver and not nvidia_versions.open_module_flag(ver):
                 self.chk_open.setEnabled(False)
@@ -466,10 +459,10 @@ class InstallPage(QWidget):
         self.chk_open.setToolTip("")
 
     def _nvk_needs_backports(self) -> bool:
-        """Czy NVK wymaga backportów: czysty Debian + karta RTX 50xx.
+        """Whether NVK requires backports: plain Debian + an RTX 50xx card.
 
-        Stabilny Debian ma za stare jądro (nouveau bez GB20x), Mesę < 25.2
-        (NVK bez Blackwella) i firmware bez GSP r570.
+        Stable Debian has too old a kernel (nouveau without GB20x), Mesa < 25.2
+        (NVK without Blackwell) and firmware without GSP r570.
         """
         distro = self._state.get("distro")
         gpus = self._state.get("gpus", [])
@@ -487,9 +480,9 @@ class InstallPage(QWidget):
             return "run"
         return "repo"
 
-    # ------------------------------------------------------ instalacja
+    # ------------------------------------------------------ installation
     def _start_install(self) -> None:
-        """Potwierdzenie i uruchomienie w pełni automatycznej instalacji."""
+        """Confirmation and launch of the fully automatic installation."""
         distro = self._state.get("distro")
         if not distro or not distro.supported:
             return
@@ -519,7 +512,7 @@ class InstallPage(QWidget):
                 )
                 return
             opis += f" ({opts.run_version})"
-            # Ostrzeżenie dla starych gałęzi Legacy
+            # Warning for old Legacy branches
             try:
                 if int(opts.run_version.split(".")[0]) < 470:
                     opis += "\n\n⚠ " + tr(
@@ -534,7 +527,7 @@ class InstallPage(QWidget):
                 if data:
                     opis += f" ({data})"
             else:
-                # Czysty Debian — lista wybiera źródło pakietów
+                # Plain Debian — the list selects the package source
                 opts.repo_source = data or "debian"
                 if opts.repo_source == "nvidia":
                     opis += " — " + tr("oficjalne repozytorium NVIDIA")
@@ -548,7 +541,7 @@ class InstallPage(QWidget):
                             " NVIDIA."
                         )
 
-        # Jedno proste pytanie — dalej wszystko dzieje się automatycznie
+        # One simple question — everything after that happens automatically
         pytanie = (
             tr("Wybrana metoda:") + f"\n{opis}\n\n"
             + tr("Instalacja jest w pełni automatyczna. System poprosi raz"
@@ -563,8 +556,8 @@ class InstallPage(QWidget):
         if odp != QMessageBox.Yes:
             return
 
-        # Bez pkexec (np. Debian bez pakietu pkexec) hasło zbiera GUI,
-        # a instalacja przechodzi awaryjnie przez sudo -S
+        # Without pkexec (e.g. Debian without the pkexec package) the GUI
+        # collects the password, and the installation falls back to sudo -S
         sudo_pw = ""
         if is_linux() and not which("pkexec"):
             if not which("sudo"):
@@ -578,7 +571,7 @@ class InstallPage(QWidget):
             if not sudo_pw:
                 return
 
-        # Blokada UI na czas instalacji
+        # Lock the UI for the duration of the installation
         self.btn_install.setEnabled(False)
         self.log.clear()
         self.progress.setValue(0)
@@ -592,9 +585,9 @@ class InstallPage(QWidget):
         self._install_thread.start()
 
     def _ask_sudo_password(self) -> str:
-        """Pyta o hasło administratora i sprawdza je przez sudo.
+        """Asks for the administrator password and verifies it via sudo.
 
-        Zwraca zweryfikowane hasło albo pusty tekst po anulowaniu.
+        Returns the verified password or an empty string after cancellation.
         """
         while True:
             pw, ok = QInputDialog.getText(
@@ -605,7 +598,7 @@ class InstallPage(QWidget):
             )
             if not ok:
                 return ""
-            # -k wymusza świeżą autoryzację, -p "" wyłącza tekstowy monit
+            # -k forces fresh authorization, -p "" disables the text prompt
             wynik = subprocess.run(
                 ["sudo", "-S", "-k", "-p", "", "true"],
                 input=pw + "\n", text=True, capture_output=True,
@@ -619,7 +612,7 @@ class InstallPage(QWidget):
 
     def _on_log(self, line: str) -> None:
         self.log.append(line)
-        # Automatyczne przewijanie do najnowszej linii
+        # Auto-scroll to the newest line
         sb = self.log.verticalScrollBar()
         sb.setValue(sb.maximum())
 
@@ -629,7 +622,7 @@ class InstallPage(QWidget):
 
     def _on_download(self, percent: int) -> None:
         self.lbl_step.setText(tr("Pobieranie sterownika...") + f" {percent}%")
-        # Pobieranie wizualizowane w pierwszej połowie paska przed skryptem
+        # The download is shown in the first half of the bar, before the script
         self.progress.setValue(percent // 2)
 
     def _on_finished(self, ok: bool, message: str) -> None:

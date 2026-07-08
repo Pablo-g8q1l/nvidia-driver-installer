@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Strona diagnostyki — kontrole systemu i zapis raportu do pliku."""
+"""Diagnostics page — system checks and saving the report to a file."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 from app.core.diagnostics import CheckResult, build_report, run_diagnostics
 from app.i18n import tr
 
-# Kolory i etykiety statusów kontroli
+# Colors and labels for the check statuses
 _STATUS_STYLE = {
     "ok": ("OK", QColor("#76b900")),
     "uwaga": ("UWAGA", QColor("#ff9800")),
@@ -24,7 +24,7 @@ _STATUS_STYLE = {
 
 
 class DiagThread(QThread):
-    """Wykonuje kontrole diagnostyczne w tle, by nie blokować GUI."""
+    """Runs the diagnostic checks in the background so as not to block the GUI."""
 
     sig_done = Signal(list)
 
@@ -33,7 +33,7 @@ class DiagThread(QThread):
 
 
 class DiagnosticsPage(QWidget):
-    """Lista kontroli ze statusami oraz szczegółowy raport błędów."""
+    """A list of checks with statuses and a detailed error report."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -111,7 +111,7 @@ class DiagnosticsPage(QWidget):
             self.lbl_summary.setText("✅ " + tr("Wszystkie kontrole zakończone pomyślnie"))
 
     def _save_report(self) -> None:
-        """Zapisuje pełny raport tekstowy w miejscu wskazanym przez użytkownika."""
+        """Saves the full text report to a location chosen by the user."""
         if not self._results:
             return
         domyslna = str(Path.home() / "raport-nvidia.txt")

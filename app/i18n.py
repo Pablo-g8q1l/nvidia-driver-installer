@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Tłumaczenia interfejsu (polski / angielski).
+"""Interface translations (Polish / English).
 
-Konwencja: kluczem tłumaczenia jest oryginalny tekst polski. Dla języka
-polskiego tr() zwraca tekst bez zmian, dla angielskiego szuka w słowniku _EN
-(brak wpisu → tekst polski jako awaryjny, program nadal działa).
+Convention: the translation key is the original Polish text. For Polish, tr()
+returns the text unchanged; for English it looks it up in the _EN dictionary
+(no entry → Polish text as a fallback, the program still works).
 """
 from __future__ import annotations
 
@@ -11,26 +11,40 @@ _current_language = "pl"
 
 
 def set_language(lang: str) -> None:
-    """Ustawia język interfejsu: "pl" lub "en"."""
+    """Sets the interface language: "pl" or "en"."""
     global _current_language
     _current_language = lang if lang in ("pl", "en") else "pl"
 
 
 def get_language() -> str:
-    """Zwraca aktualny język interfejsu."""
+    """Returns the current interface language."""
     return _current_language
 
 
 def tr(text: str) -> str:
-    """Tłumaczy tekst interfejsu na aktualny język."""
+    """Translates interface text into the current language."""
     if _current_language == "pl":
         return text
     return _EN.get(text, text)
 
 
-# Słownik tłumaczeń: tekst polski → angielski
+def tr_prefix(text: str) -> str:
+    """tr() tolerant of a dynamic suffix in parentheses.
+
+    Used for installation step and error messages whose text ends with a
+    runtime value in parentheses (e.g. a package name) that is not in the
+    dictionary. Then only the prefix before " (" is translated.
+    """
+    t = tr(text)
+    if t == text and text.endswith(")") and " (" in text:
+        prefix, _, rest = text.rpartition(" (")
+        return tr(prefix) + f" ({rest}"
+    return t
+
+
+# Translation dictionary: Polish text → English
 _EN = {
-    # --- Główne okno / zakładki ---
+    # --- Main window / tabs ---
     "Instalacja": "Installation",
     "Monitor GPU": "GPU Monitor",
     "Diagnostyka": "Diagnostics",
@@ -39,7 +53,7 @@ _EN = {
     "Wykrywanie systemu...": "Detecting system...",
     "brak karty NVIDIA": "no NVIDIA card",
 
-    # --- Strona instalacji ---
+    # --- Installation page ---
     "Wykryty system": "Detected system",
     "Dystrybucja: wykrywanie...": "Distribution: detecting...",
     "Karta graficzna: wykrywanie...": "Graphics card: detecting...",
@@ -188,9 +202,9 @@ _EN = {
     "Pełny log znajdziesz w zakładce Historia.":
         "The full log is available in the History tab.",
 
-    # --- Etykiety kroków instalacji (installer.py; tłumaczone przy
-    #     wyświetlaniu w page_install._tr_step — same przedrostki obsługują
-    #     etykiety z dynamiczną nazwą pakietu w nawiasie) ---
+    # --- Installation step labels (installer.py; translated when displayed
+    #     in page_install._tr_step — the prefixes alone handle labels with a
+    #     dynamic package name in parentheses) ---
     "Aktualizacja initramfs": "Updating initramfs",
     "Budowanie modułu DKMS dla pozostałych jąder":
         "Building the DKMS module for the remaining kernels",
@@ -250,7 +264,7 @@ _EN = {
     "Włączanie sekcji contrib / non-free / non-free-firmware":
         "Enabling the contrib / non-free / non-free-firmware sections",
 
-    # --- Monitor GPU ---
+    # --- GPU Monitor ---
     "Oczekiwanie na dane z GPU...": "Waiting for GPU data...",
     "Statystyki na żywo": "Live statistics",
     "Temperatura:": "Temperature:",
@@ -266,7 +280,7 @@ _EN = {
         "The monitor requires the NVIDIA driver (nvidia-smi). With NVK /"
         " nouveau, statistics are not available.",
 
-    # --- Diagnostyka ---
+    # --- Diagnostics ---
     "Diagnostyka sprawdza stan sterownika, Secure Boot, nagłówki"
     " jądra, DKMS i logi. Uruchom ją, gdy coś nie działa.":
         "Diagnostics checks the driver state, Secure Boot, kernel headers,"
@@ -291,7 +305,7 @@ _EN = {
     "UWAGA": "WARNING",
     "BŁĄD": "ERROR",
 
-    # --- Kontrole diagnostyczne (diagnostics.py) ---
+    # --- Diagnostic checks (diagnostics.py) ---
     "Karta graficzna NVIDIA": "NVIDIA graphics card",
     "Wykryto:": "Detected:",
     "Nie wykryto karty NVIDIA (lspci) — sterownik nie ma czego obsługiwać":
@@ -429,7 +443,7 @@ _EN = {
     "repozytorium": "repository",
     "jądro / Mesa": "kernel / Mesa",
 
-    # --- Historia ---
+    # --- History ---
     "Zamknij": "Close",
     "Podwójne kliknięcie wpisu otwiera pełny log instalacji.":
         "Double-click an entry to open the full installation log.",
@@ -441,7 +455,7 @@ _EN = {
     "Log instalacji": "Installation log",
     "Usunąć wszystkie wpisy historii wraz z plikami logów?":
         "Delete all history entries together with log files?",
-    # Wartości zapisane w history.json (metoda, wersja i status po polsku)
+    # Values stored in history.json (method, version and status in Polish)
     "Repozytorium dystrybucji": "Distribution repository",
     "Plik .run NVIDIA": "NVIDIA .run file",
     "repozytorium NVIDIA": "NVIDIA repository",
@@ -450,7 +464,7 @@ _EN = {
     "Brak zapisanego logu dla tego wpisu.": "No saved log for this entry.",
     "Nie można odczytać pliku logu:": "Cannot read the log file:",
 
-    # --- Ustawienia ---
+    # --- Settings ---
     "Ustawienia programu": "Program settings",
     "Język interfejsu:": "Interface language:",
     "Motyw:": "Theme:",
@@ -485,4 +499,32 @@ _EN = {
         "The boot report service will be enabled on the next installation.",
     "Usługa raportu rozruchu zostanie usunięta przy najbliższej instalacji.":
         "The boot report service will be removed on the next installation.",
+
+    # --- Installation error messages (installer.py; "blad" markers, translated
+    #     in InstallThread.run when read; the prefixes alone handle messages
+    #     with a dynamic package name in parentheses) ---
+    "Instalacja pakietów nie powiodła się": "Package installation failed",
+    "Instalacja pakietu nie powiodła się": "Package installation failed",
+    "Naprawa pakietu nie powiodła się": "Package repair failed",
+    "apt-get update nie powiodło się": "apt-get update failed",
+    "Aktualizacja initramfs nie powiodła się": "initramfs update failed",
+    "Nie udało się zapisać makra RPM": "Failed to write the RPM macro",
+    "Budowanie modułu jądra nie powiodło się": "Building the kernel module failed",
+    "Instalacja pakietu cuda-keyring nie powiodła się":
+        "Installing the cuda-keyring package failed",
+    "Instalacja pakietów Mesa nie powiodła się": "Installing Mesa packages failed",
+    "Instalacja pakietu linux-firmware nie powiodła się":
+        "Installing the linux-firmware package failed",
+    "Instalacja pakietu nvidia-gpu-firmware nie powiodła się":
+        "Installing the nvidia-gpu-firmware package failed",
+    "Instalacja jądra z backportów nie powiodła się":
+        "Installing the kernel from backports failed",
+    "Instalacja pakietów Mesa z backportów nie powiodła się":
+        "Installing Mesa packages from backports failed",
+    "Instalacja firmware nouveau nie powiodła się":
+        "Installing nouveau firmware failed",
+    "Instalacja zależności nie powiodła się": "Installing dependencies failed",
+    "Instalator NVIDIA zwrócił błąd — szczegóły w /var/log/nvidia-installer.log":
+        "The NVIDIA installer returned an error — details in"
+        " /var/log/nvidia-installer.log",
 }

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Strona historii instalacji — tabela wpisów z podglądem pełnych logów."""
+"""Installation history page — a table of entries with full log preview."""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
@@ -14,7 +14,7 @@ from app.i18n import tr
 
 
 class LogDialog(QDialog):
-    """Okno z pełnym logiem wybranej instalacji."""
+    """A window with the full log of the selected installation."""
 
     def __init__(self, title: str, log_text: str, parent=None):
         super().__init__(parent)
@@ -31,7 +31,7 @@ class LogDialog(QDialog):
 
 
 class HistoryPage(QWidget):
-    """Wszystkie dotychczasowe instalacje z datą, metodą, wersją i statusem."""
+    """All past installations with date, method, version and status."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -71,8 +71,8 @@ class HistoryPage(QWidget):
         self.table.itemDoubleClicked.connect(self._show_log)
         layout.addWidget(self.table, stretch=1)
 
-    def showEvent(self, event) -> None:  # noqa: N802 — API Qt
-        """Historia odświeża się przy każdym wejściu na zakładkę."""
+    def showEvent(self, event) -> None:  # noqa: N802 — Qt API
+        """The history refreshes every time the tab is entered."""
         super().showEvent(event)
         self.refresh()
 
@@ -80,8 +80,8 @@ class HistoryPage(QWidget):
         self._entries = history.load_history()
         self.table.setRowCount(len(self._entries))
         for row, e in enumerate(self._entries):
-            # Metoda, wersja i status są zapisane po polsku — tłumaczone przy
-            # wyświetlaniu (tr() zostawia bez zmian numery wersji i pakiety)
+            # Method, version and status are stored in Polish — translated when
+            # displayed (tr() leaves version numbers and packages unchanged)
             values = [
                 e.get("data", ""), tr(e.get("metoda", "")),
                 tr(e.get("wersja", "")),
@@ -89,7 +89,7 @@ class HistoryPage(QWidget):
             ]
             for col, val in enumerate(values):
                 item = QTableWidgetItem(str(val))
-                if col == 4:  # kolorowanie statusu (po wartości zapisanej)
+                if col == 4:  # status coloring (by the stored value)
                     item.setForeground(
                         QColor("#76b900") if e.get("status") == "sukces"
                         else QColor("#f44336")

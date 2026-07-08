@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Wykrywanie dystrybucji Linuksa na podstawie /etc/os-release.
+"""Linux distribution detection based on /etc/os-release.
 
-Program grupuje dystrybucje w trzy rodziny, bo w ramach rodziny instalacja
-sterownika przebiega tak samo:
+The program groups distributions into three families, because within a family
+the driver installation works the same way:
   - arch   → Arch Linux, CachyOS, EndeavourOS          (pacman, mkinitcpio/dracut)
   - fedora → Fedora 44, Nobara 43                      (dnf, dracut)
   - debian → Debian, Kubuntu 26.04 LTS, Mint 22.3      (apt, update-initramfs)
@@ -14,13 +14,13 @@ from dataclasses import dataclass
 
 from .utils import is_linux, read_file
 
-# Polecenie odbudowy initramfs właściwe dla każdej rodziny.
-# Rodzina arch nie ma jednego generatora: czysty Arch i CachyOS używają
-# mkinitcpio, EndeavourOS — dracuta (bez mkinitcpio na dysku; przypadek
-# EndeavourOS 2026-07-05: „mkinitcpio: nie znaleziono polecenia").
-# Wybór warunkowany obecnością narzędzia, nie nazwą dystrybucji;
-# dracut-rebuild (eos-dracut) ma pierwszeństwo przed gołym dracutem,
-# bo zna układ obrazów EOS (/boot/initramfs-linux.img).
+# initramfs rebuild command specific to each family.
+# The arch family has no single generator: plain Arch and CachyOS use
+# mkinitcpio, EndeavourOS — dracut (without mkinitcpio on disk; the
+# EndeavourOS 2026-07-05 case: "mkinitcpio: command not found").
+# The choice is conditioned on the tool's presence, not the distribution name;
+# dracut-rebuild (eos-dracut) takes precedence over bare dracut, because it
+# knows the EOS image layout (/boot/initramfs-linux.img).
 INITRAMFS_CMD = {
     "arch": (
         "if command -v mkinitcpio >/dev/null 2>&1; then mkinitcpio -P; "
@@ -34,23 +34,23 @@ INITRAMFS_CMD = {
 
 @dataclass
 class DistroInfo:
-    """Informacje o wykrytej dystrybucji."""
+    """Information about the detected distribution."""
 
-    id: str = ""              # np. "arch", "fedora", "linuxmint"
-    name: str = "?"           # pełna nazwa, np. "Linux Mint 22.3"
-    version: str = ""         # numer wersji z VERSION_ID
-    family: str = ""          # rodzina: "arch" | "fedora" | "debian" | ""
-    ubuntu_based: bool = False  # Kubuntu/Mint — inne pakiety niż czysty Debian
-    supported: bool = False   # czy rodzina jest obsługiwana przez program
+    id: str = ""              # e.g. "arch", "fedora", "linuxmint"
+    name: str = "?"           # full name, e.g. "Linux Mint 22.3"
+    version: str = ""         # version number from VERSION_ID
+    family: str = ""          # family: "arch" | "fedora" | "debian" | ""
+    ubuntu_based: bool = False  # Kubuntu/Mint — different packages than plain Debian
+    supported: bool = False   # whether the family is supported by the program
 
     @property
     def initramfs_cmd(self) -> str:
-        """Polecenie aktualizacji initramfs dla tej dystrybucji."""
+        """initramfs update command for this distribution."""
         return INITRAMFS_CMD.get(self.family, "")
 
 
 def _parse_os_release(text: str) -> dict:
-    """Parsuje format klucz=wartość pliku os-release (cudzysłowy usuwane)."""
+    """Parses the key=value format of the os-release file (quotes stripped)."""
     data: dict[str, str] = {}
     for line in text.splitlines():
         line = line.strip()
@@ -61,14 +61,14 @@ def _parse_os_release(text: str) -> dict:
 
 
 def detect_distro() -> DistroInfo:
-    """Wykrywa dystrybucję. Na innych systemach zwraca tryb podglądu."""
+    """Detects the distribution. On other systems returns preview mode."""
     if not is_linux():
-        # Tryb podglądu — GUI działa, ale funkcje systemowe są wyłączone
+        # Preview mode — the GUI works, but system functions are disabled
         return DistroInfo(name=f"{os.name} (tryb podglądu — to nie Linux)")
 
     osr = _parse_os_release(read_file("/etc/os-release"))
     distro_id = osr.get("ID", "").lower()
-    # ID + ID_LIKE razem pozwalają rozpoznać pochodne (CachyOS → arch itd.)
+    # ID + ID_LIKE together allow recognizing derivatives (CachyOS → arch etc.)
     ids = {distro_id} | set(osr.get("ID_LIKE", "").lower().split())
 
     if "arch" in ids:

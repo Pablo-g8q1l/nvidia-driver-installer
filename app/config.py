@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Ustawienia użytkownika (język, motyw) zapisywane w pliku JSON."""
+"""User settings (language, theme) stored in a JSON file."""
 from __future__ import annotations
 
 import json
@@ -11,19 +11,19 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 
 
 def _system_language() -> str:
-    """Język interfejsu z ustawień systemu: polski → "pl", inny → "en".
+    """Interface language from system settings: Polish → "pl", other → "en".
 
-    Sprawdzane są zmienne locale w kolejności obowiązywania (LC_ALL nadpisuje
-    LC_MESSAGES, ta — LANG). Wartość jak "pl_PL.UTF-8" → polski; wszystko
-    inne (en_US, de_DE, "C"…) → angielski. Działa tylko jako wartość
-    DOMYŚLNA — język wybrany w Ustawieniach jest zapisany w config.json
-    i zawsze ma pierwszeństwo.
+    Locale variables are checked in order of precedence (LC_ALL overrides
+    LC_MESSAGES, which overrides LANG). A value like "pl_PL.UTF-8" → Polish;
+    everything else (en_US, de_DE, "C"…) → English. Used only as the DEFAULT
+    value — the language chosen in Settings is stored in config.json and
+    always takes precedence.
     """
     for var in ("LC_ALL", "LC_MESSAGES", "LANG"):
         val = os.environ.get(var)
         if val:
             return "pl" if val.lower().startswith("pl") else "en"
-    # Brak zmiennych locale (np. Windows w trybie podglądu) — locale Pythona
+    # No locale variables (e.g. Windows in preview mode) — Python locale
     try:
         import locale
         loc = (locale.getlocale()[0] or "").lower()
@@ -32,14 +32,14 @@ def _system_language() -> str:
         return "en"
 
 
-# Wartości domyślne — język wykrywany z systemu (polskie locale → polski,
-# inne → angielski), ciemny motyw, raport rozruchu wyłączony (opt-in:
-# usługa diagnostyczna zostaje na systemie, więc wymaga zgody w Ustawieniach)
+# Default values — language detected from the system (Polish locale → Polish,
+# other → English), dark theme, boot report disabled (opt-in: the diagnostic
+# service stays on the system, so it requires consent in Settings)
 DEFAULTS = {"language": _system_language(), "theme": "dark", "boot_report": False}
 
 
 def load_config() -> dict:
-    """Wczytuje ustawienia; przy braku lub uszkodzeniu pliku zwraca domyślne."""
+    """Loads settings; returns defaults if the file is missing or corrupted."""
     cfg = dict(DEFAULTS)
     try:
         data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
@@ -51,7 +51,7 @@ def load_config() -> dict:
 
 
 def save_config(cfg: dict) -> None:
-    """Zapisuje ustawienia na dysk (błędy zapisu ignorowane — nie są krytyczne)."""
+    """Saves settings to disk (write errors are ignored — they are not critical)."""
     try:
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
         CONFIG_FILE.write_text(

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""NVIDIA Driver Installer — punkt wejścia aplikacji.
+"""NVIDIA Driver Installer — application entry point.
 
-Uruchamianie: ./NVIDIA-Installer.run (skrypt tworzy środowisko wirtualne)
-lub ręcznie: python3 main.py (wymaga zainstalowanego PySide6 i requests).
+Launching: ./NVIDIA-Installer.run (the script creates a virtual environment)
+or manually: python3 main.py (requires PySide6 and requests to be installed).
 """
 import sys
 
@@ -16,7 +16,7 @@ from app.gui.theme import apply_theme
 
 
 def main() -> int:
-    """Tworzy aplikację Qt, nakłada motyw i pokazuje główne okno."""
+    """Creates the Qt application, applies the theme and shows the main window."""
     utils.ensure_dirs()
     cfg = config.load_config()
     i18n.set_language(cfg.get("language", "pl"))

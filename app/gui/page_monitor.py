@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Strona monitora GPU — statystyki na żywo z nvidia-smi (co 2 sekundy)."""
+"""GPU monitor page — live statistics from nvidia-smi (every 2 seconds)."""
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
@@ -11,7 +11,7 @@ from app.i18n import tr
 
 
 class MonitorPage(QWidget):
-    """Temperatura, użycie GPU, pamięć VRAM, pobór mocy i wentylator."""
+    """Temperature, GPU usage, VRAM, power draw and fan."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -22,7 +22,7 @@ class MonitorPage(QWidget):
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
-        # Nazwa GPU i wersja sterownika
+        # GPU name and driver version
         self.lbl_gpu = QLabel(tr("Oczekiwanie na dane z GPU..."))
         self.lbl_gpu.setObjectName("header")
         layout.addWidget(self.lbl_gpu)
@@ -34,17 +34,17 @@ class MonitorPage(QWidget):
         grid = QGridLayout(box)
         grid.setVerticalSpacing(14)
 
-        # Temperatura — pasek 0-100 °C, kolor zależny od wartości
+        # Temperature — a 0-100 °C bar, color depending on the value
         grid.addWidget(QLabel(tr("Temperatura:")), 0, 0)
         self.bar_temp = QProgressBar()
         grid.addWidget(self.bar_temp, 0, 1)
 
-        # Użycie GPU
+        # GPU usage
         grid.addWidget(QLabel(tr("Użycie GPU:")), 1, 0)
         self.bar_util = QProgressBar()
         grid.addWidget(self.bar_util, 1, 1)
 
-        # Pamięć VRAM
+        # VRAM
         grid.addWidget(QLabel(tr("Pamięć VRAM:")), 2, 0)
         self.bar_mem = QProgressBar()
         grid.addWidget(self.bar_mem, 2, 1)
@@ -52,7 +52,7 @@ class MonitorPage(QWidget):
         self.lbl_mem.setObjectName("dim")
         grid.addWidget(self.lbl_mem, 3, 1)
 
-        # Pobór mocy
+        # Power draw
         grid.addWidget(QLabel(tr("Pobór mocy:")), 4, 0)
         self.bar_power = QProgressBar()
         grid.addWidget(self.bar_power, 4, 1)
@@ -60,7 +60,7 @@ class MonitorPage(QWidget):
         self.lbl_power.setObjectName("dim")
         grid.addWidget(self.lbl_power, 5, 1)
 
-        # Wentylator
+        # Fan
         grid.addWidget(QLabel(tr("Wentylator:")), 6, 0)
         self.bar_fan = QProgressBar()
         grid.addWidget(self.bar_fan, 6, 1)
@@ -68,16 +68,16 @@ class MonitorPage(QWidget):
         grid.setColumnStretch(1, 1)
         layout.addWidget(box)
 
-        # Komunikat, gdy monitor jest niedostępny (np. NVK bez nvidia-smi)
+        # Message shown when the monitor is unavailable (e.g. NVK without nvidia-smi)
         self.lbl_info = QLabel("")
         self.lbl_info.setObjectName("dim")
         self.lbl_info.setWordWrap(True)
         layout.addWidget(self.lbl_info)
         layout.addStretch()
 
-    # ------------------------------------------------ start/stop przy zmianie zakładki
-    def showEvent(self, event) -> None:  # noqa: N802 — API Qt
-        """Monitor działa tylko, gdy zakładka jest widoczna (oszczędność zasobów)."""
+    # ------------------------------------------------ start/stop on tab change
+    def showEvent(self, event) -> None:  # noqa: N802 — Qt API
+        """The monitor runs only while the tab is visible (to save resources)."""
         super().showEvent(event)
         if self._thread is None:
             self._thread = MonitorThread(self)
@@ -85,24 +85,24 @@ class MonitorPage(QWidget):
             self._thread.sig_error.connect(self._on_error)
             self._thread.start()
 
-    def hideEvent(self, event) -> None:  # noqa: N802 — API Qt
+    def hideEvent(self, event) -> None:  # noqa: N802 — Qt API
         super().hideEvent(event)
         self.stop_monitor()
 
     def stop_monitor(self) -> None:
-        """Zatrzymuje wątek monitora (też przy zamykaniu programu)."""
+        """Stops the monitor thread (also when the program is closing)."""
         if self._thread is not None:
             self._thread.stop()
             self._thread.wait(2000)
             self._thread = None
 
-    # ------------------------------------------------ aktualizacja danych
+    # ------------------------------------------------ data update
     def _on_data(self, s: dict) -> None:
         self.lbl_info.setText("")
         self.lbl_gpu.setText(s.get("name") or "GPU")
         self.lbl_driver.setText(f"{tr('Sterownik')}: {s.get('driver', '—')}")
 
-        # Temperatura z kolorem: zielony < 70°C, pomarańczowy < 85°C, czerwony wyżej
+        # Temperature with color: green < 70°C, orange < 85°C, red above
         temp = s.get("temp")
         if temp is not None:
             kolor = "#76b900" if temp < 70 else ("#ff9800" if temp < 85 else "#f44336")

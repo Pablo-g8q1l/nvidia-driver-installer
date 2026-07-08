@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Diagnostyka systemu pod kątem sterownika NVIDIA.
+"""System diagnostics for the NVIDIA driver.
 
-Każda kontrola zwraca CheckResult ze statusem:
-  ok    — wszystko w porządku
-  uwaga — działa, ale coś wymaga uwagi (np. Secure Boot)
-  blad  — problem uniemożliwiający poprawną pracę sterownika
-  info  — informacja neutralna
+Each check returns a CheckResult with a status:
+  ok    — everything is fine
+  uwaga — works, but something needs attention (e.g. Secure Boot)
+  blad  — a problem preventing the driver from working correctly
+  info  — neutral information
 """
 from __future__ import annotations
 
@@ -29,11 +29,11 @@ from .utils import is_linux, read_file, run, which
 
 @dataclass
 class CheckResult:
-    """Wynik pojedynczej kontroli diagnostycznej."""
+    """Result of a single diagnostic check."""
 
-    kategoria: str  # nazwa kontroli, np. "Secure Boot"
+    kategoria: str  # check name, e.g. "Secure Boot"
     status: str     # "ok" | "uwaga" | "blad" | "info"
-    opis: str       # szczegóły w języku interfejsu (tr() przy tworzeniu)
+    opis: str       # details in the interface language (tr() when created)
 
 
 def _check_gpu() -> CheckResult:
@@ -63,9 +63,9 @@ def _check_driver() -> CheckResult:
 
 def _check_module_loaded() -> CheckResult:
     modules = read_file("/proc/modules")
-    # Sterownik musi nie tylko być załadowany, ale też przejąć kartę —
-    # moduł bez przypiętego urządzenia oznacza nieudany probe (karta bez
-    # sterownika, pulpit działa wtedy na renderowaniu programowym CPU)
+    # The driver must not only be loaded, but also claim the card —
+    # a module without a bound device means a failed probe (card without
+    # a driver, the desktop then runs on CPU software rendering)
     if re.search(r"^nvidia\s", modules, re.M):
         if driver_bound("nvidia"):
             return CheckResult(
@@ -112,7 +112,7 @@ def _check_nvidia_smi() -> CheckResult:
 
 
 def _check_version_match() -> CheckResult:
-    """Niezgodność wersji modułu jądra i bibliotek zdarza się po aktualizacji."""
+    """A mismatch between the kernel module and library versions happens after an update."""
     kernel_ver = read_file("/sys/module/nvidia/version").strip()
     if not kernel_ver:
         return CheckResult(
@@ -156,7 +156,7 @@ def _check_secure_boot() -> CheckResult:
 
 
 def _check_kernel_headers() -> CheckResult:
-    """DKMS wymaga nagłówków dokładnie dla działającego jądra."""
+    """DKMS requires headers exactly for the running kernel."""
     _, uname, _ = run(["uname", "-r"])
     build_dir = f"/lib/modules/{uname}/build"
     if uname and os.path.isdir(build_dir):
@@ -188,11 +188,11 @@ def _check_nouveau_blacklist() -> CheckResult:
 
 
 def _check_gsp_firmware() -> CheckResult:
-    """Nouveau/NVK na kartach RTX (Turing+) wymaga firmware GSP od NVIDII.
+    """Nouveau/NVK on RTX cards (Turing+) requires GSP firmware from NVIDIA.
 
-    Firmware dostarcza pakiet dystrybucji (linux-firmware / firmware-nouveau /
-    nvidia-gpu-firmware). Bez niego probe nouveau kończy się błędem i karta
-    zostaje bez sterownika.
+    The firmware is provided by a distribution package (linux-firmware /
+    firmware-nouveau / nvidia-gpu-firmware). Without it the nouveau probe
+    fails and the card is left without a driver.
     """
     gpus = detect_gpus()
     if not gpus or not any(is_turing_or_newer(g.name) for g in gpus):
@@ -220,7 +220,7 @@ def _check_gsp_firmware() -> CheckResult:
     )
 
 
-# Zmienne wymuszające sterownik NVIDIA w bibliotekach graficznych (GL/EGL/VA)
+# Variables forcing the NVIDIA driver in graphics libraries (GL/EGL/VA)
 _GL_ENV_KEYS = (
     "GBM_BACKEND",
     "__GLX_VENDOR_LIBRARY_NAME",
@@ -232,12 +232,12 @@ _GL_ENV_KEYS = (
 
 
 def _check_gl_env() -> CheckResult:
-    """Wykrywa wymuszenie sterownika NVIDIA w zmiennych środowiskowych.
+    """Detects the NVIDIA driver being forced through environment variables.
 
-    Takie wpisy (np. w /etc/environment) zostawiają inne narzędzia. Gdy
-    sterownika NVIDIA nie ma w systemie, wymuszenia psują inicjalizację
-    EGL i pulpit spada na renderowanie programowe (CPU) — objaw: tnący
-    kursor i animacje mimo działającego nouveau/NVK.
+    Such entries (e.g. in /etc/environment) are left behind by other tools.
+    When the NVIDIA driver is not present on the system, the forcing breaks
+    EGL initialization and the desktop falls back to software rendering (CPU)
+    — symptom: a stuttering cursor and animations despite working nouveau/NVK.
     """
     import glob
     paths = ["/etc/environment"] + sorted(glob.glob("/etc/environment.d/*.conf"))
@@ -268,12 +268,12 @@ def _check_gl_env() -> CheckResult:
 
 
 def _check_glvnd() -> CheckResult:
-    """Sprawdza plik glvnd EGL sterownika NVIDIA (10_nvidia.json).
+    """Checks the NVIDIA driver's glvnd EGL file (10_nvidia.json).
 
-    Bez niego biblioteka EGL nie znajduje sterownika NVIDIA i pulpit
-    spada na renderowanie programowe (CPU), mimo że nvidia-smi działa.
-    Plik potrafi zniknąć, gdy nvidia-uninstall z instalacji .run wykona
-    się w trakcie instalowania pakietów z repozytorium.
+    Without it the EGL library cannot find the NVIDIA driver and the desktop
+    falls back to software rendering (CPU), even though nvidia-smi works.
+    The file can disappear when nvidia-uninstall from a .run installation
+    runs while packages are being installed from the repository.
     """
     if not re.search(r"^nvidia\s", read_file("/proc/modules"), re.M):
         return CheckResult(
@@ -304,8 +304,8 @@ def _check_modeset() -> CheckResult:
             "KMS (modeset)", "uwaga",
             tr("nvidia_drm modeset wyłączony — Wayland może nie działać poprawnie"),
         )
-    # Parametr nieodczytany: moduł nieaktywny albo plik w /sys dostępny tylko
-    # dla roota (tak jest na nowszych sterownikach) — rozróżnij te przypadki
+    # Parameter not read: module inactive or the /sys file readable only by
+    # root (as on newer drivers) — distinguish these cases
     if not re.search(r"^nvidia_drm\s", read_file("/proc/modules"), re.M):
         return CheckResult(
             "KMS (modeset)", "info", tr("Moduł nvidia_drm nieaktywny — pominięto")
@@ -361,9 +361,9 @@ def _check_dkms() -> CheckResult:
 
 
 def _check_kernel_log() -> CheckResult:
-    """Szuka błędów NVRM/nouveau w logu jądra bieżącego rozruchu."""
-    # Format "-o cat" zwraca sam komunikat, bez daty i hostname — inaczej
-    # hostname zawierający "nvidia" dopasowałby każdą linię logu
+    """Searches for NVRM/nouveau errors in the current boot's kernel log."""
+    # The "-o cat" format returns just the message, without date and hostname —
+    # otherwise a hostname containing "nvidia" would match every log line
     code, out, _ = run(
         ["journalctl", "-k", "-b", "--no-pager", "-p", "err", "-n", "200",
          "-o", "cat"],
@@ -389,7 +389,7 @@ def _check_kernel_log() -> CheckResult:
 
 
 def run_diagnostics() -> list[CheckResult]:
-    """Wykonuje wszystkie kontrole i zwraca listę wyników."""
+    """Runs all checks and returns the list of results."""
     if not is_linux():
         return [
             CheckResult(
@@ -427,7 +427,7 @@ def run_diagnostics() -> list[CheckResult]:
 
 
 def build_report(results: list[CheckResult], distro: DistroInfo | None = None) -> str:
-    """Buduje tekstowy raport diagnostyczny do zapisania w pliku."""
+    """Builds a text diagnostic report to be saved to a file."""
     _, uname, _ = run(["uname", "-a"])
     lines = [
         "=" * 70,

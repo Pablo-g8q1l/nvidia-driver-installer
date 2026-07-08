@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Narzędzia wspólne: bezpieczne uruchamianie poleceń i ścieżki danych programu.
+"""Shared utilities: safe command execution and program data paths.
 
-Wszystkie wywołania poleceń systemowych przechodzą przez run() — funkcja nigdy
-nie rzuca wyjątku, dzięki czemu program działa też tam, gdzie polecenia nie
-istnieją (np. podgląd GUI na Windows).
+All system command calls go through run() — the function never raises an
+exception, so the program also works where the commands do not exist
+(e.g. GUI preview on Windows).
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Katalogi programu (konfiguracja, dane, logi, pobrane pliki .run)
+# Program directories (configuration, data, logs, downloaded .run files)
 CONFIG_DIR = Path.home() / ".config" / "nvidia-installer-gui"
 DATA_DIR = Path.home() / ".local" / "share" / "nvidia-installer-gui"
 LOG_DIR = DATA_DIR / "logs"
@@ -20,26 +20,26 @@ CACHE_DIR = Path.home() / ".cache" / "nvidia-installer-gui"
 
 
 def ensure_dirs() -> None:
-    """Tworzy katalogi programu, jeśli nie istnieją."""
+    """Creates the program directories if they do not exist."""
     for d in (CONFIG_DIR, DATA_DIR, LOG_DIR, CACHE_DIR):
         d.mkdir(parents=True, exist_ok=True)
 
 
 def is_linux() -> bool:
-    """Czy program działa na Linuksie (funkcje systemowe dostępne)."""
+    """Whether the program runs on Linux (system functions available)."""
     return sys.platform.startswith("linux")
 
 
 def which(cmd: str) -> str | None:
-    """Zwraca ścieżkę polecenia lub None, gdy nie jest zainstalowane."""
+    """Returns the command path or None if it is not installed."""
     return shutil.which(cmd)
 
 
 def run(cmd: list[str], timeout: int = 30) -> tuple[int, str, str]:
-    """Uruchamia polecenie i zwraca (kod, stdout, stderr).
+    """Runs a command and returns (code, stdout, stderr).
 
-    Nigdy nie rzuca wyjątku — błędy zamieniane są na niezerowy kod wyjścia,
-    dzięki czemu wywołujący zawsze może bezpiecznie sprawdzić wynik.
+    Never raises an exception — errors are converted into a non-zero exit
+    code, so the caller can always safely check the result.
     """
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
@@ -48,12 +48,12 @@ def run(cmd: list[str], timeout: int = 30) -> tuple[int, str, str]:
         return 127, "", f"Nie znaleziono polecenia: {cmd[0]}"
     except subprocess.TimeoutExpired:
         return 124, "", f"Przekroczono limit czasu: {' '.join(cmd)}"
-    except Exception as e:  # pragma: no cover — ostatnia linia obrony
+    except Exception as e:  # pragma: no cover — last line of defense
         return 1, "", str(e)
 
 
 def read_file(path: str) -> str:
-    """Czyta plik tekstowy; zwraca pusty tekst, gdy plik nie istnieje."""
+    """Reads a text file; returns an empty string if the file does not exist."""
     try:
         return Path(path).read_text(encoding="utf-8", errors="replace")
     except OSError:

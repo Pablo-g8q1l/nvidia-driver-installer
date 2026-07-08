@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Wykrywanie dostępnych wersji sterownika NVIDIA.
+"""Detecting available NVIDIA driver versions.
 
-Dwa źródła:
-  1. Pliki .run — oficjalna strona NVIDIA Unix Drivers (Production /
-     New Feature / Beta / Legacy); przy braku internetu wersje zapasowe.
-  2. Repozytorium dystrybucji — zapytania pacman / dnf / apt wykonywane
-     lokalnie, bez uprawnień administratora.
+Two sources:
+  1. .run files — the official NVIDIA Unix Drivers page (Production /
+     New Feature / Beta / Legacy); fallback versions when offline.
+  2. Distribution repository — pacman / dnf / apt queries run locally,
+     without administrator privileges.
 """
 from __future__ import annotations
 
@@ -14,16 +14,16 @@ import re
 from .distro import DistroInfo
 from .utils import run, which
 
-# Strona NVIDIA z aktualnymi wersjami sterowników dla Linuksa
+# NVIDIA page with the current driver versions for Linux
 UNIX_DRIVERS_URL = "https://www.nvidia.com/en-us/drivers/unix/"
-# Zapasowe źródło — plik tekstowy z najnowszą wersją
+# Fallback source — a text file with the latest version
 LATEST_TXT_URL = "https://download.nvidia.com/XFree86/Linux-x86_64/latest.txt"
-# Oficjalne repozytorium APT NVIDIA — na czystym Debianie jedyne źródło
-# pakietów nowszych niż seria 550 (wymagane m.in. dla kart RTX 50xx)
+# Official NVIDIA APT repository — on plain Debian the only source of packages
+# newer than series 550 (required among others for RTX 50xx cards)
 NVIDIA_REPO_BASE = "https://developer.download.nvidia.com/compute/cuda/repos"
 
-# Wersje zapasowe używane tylko przy całkowitym braku internetu.
-# Instalacja i tak wymaga sieci, więc służą głównie do pokazania GUI.
+# Fallback versions used only when there is no internet at all.
+# Installation requires the network anyway, so they mainly serve to show the GUI.
 FALLBACK_VERSIONS = {
     "production": "580.95.05",
     "new_feature": None,
@@ -31,7 +31,7 @@ FALLBACK_VERSIONS = {
     "legacy": ["470.256.02", "390.157", "340.108"],
 }
 
-# Etykiety gałęzi na stronie NVIDIA → klucze słownika wyników
+# Branch labels on the NVIDIA page → keys of the result dictionary
 _BRANCH_PATTERNS = {
     "production": r"Production\s+Branch\s+Version",
     "new_feature": r"New\s+Feature\s+Branch\s+Version",
@@ -42,10 +42,10 @@ _VER_RE = r"(\d{3}\.\d{1,3}(?:\.\d{1,3})?)"
 
 
 def _http_get(url: str, timeout: int) -> str:
-    """Pobiera tekst spod adresu wbudowanym urllib.
+    """Fetches text from a URL using the built-in urllib.
 
-    Celowo bez requests — wersja CLI działa na systemowym Pythonie bez
-    dodatkowych pakietów, a GUI zachowuje się identycznie.
+    Deliberately without requests — the CLI version runs on the system Python
+    without extra packages, and the GUI behaves identically.
     """
     import urllib.request
 
@@ -57,7 +57,7 @@ def _http_get(url: str, timeout: int) -> str:
 
 
 def download_url(version: str) -> str:
-    """Adres pobierania pliku .run dla podanej wersji."""
+    """Download URL of the .run file for the given version."""
     return (
         "https://us.download.nvidia.com/XFree86/Linux-x86_64/"
         f"{version}/NVIDIA-Linux-x86_64-{version}.run"
@@ -65,9 +65,9 @@ def download_url(version: str) -> str:
 
 
 def fetch_run_versions(timeout: int = 15) -> dict:
-    """Pobiera aktualne wersje gałęzi .run ze strony NVIDIA.
+    """Fetches the current .run branch versions from the NVIDIA page.
 
-    Zwraca {"production": str|None, "new_feature": ..., "beta": ...,
+    Returns {"production": str|None, "new_feature": ..., "beta": ...,
     "legacy": [str, ...], "online": bool}.
     """
     result = {
@@ -80,13 +80,13 @@ def fetch_run_versions(timeout: int = 15) -> dict:
     try:
         html = _http_get(UNIX_DRIVERS_URL, timeout)
 
-        # Gałęzie główne: szukamy wersji najbliżej etykiety gałęzi
+        # Main branches: we look for the version closest to the branch label
         for key, label in _BRANCH_PATTERNS.items():
             m = re.search(label + r".{0,300}?" + _VER_RE, html, re.S | re.I)
             if m:
                 result[key] = m.group(1)
 
-        # Gałęzie Legacy (470.xx / 390.xx / 340.xx) — może być ich kilka
+        # Legacy branches (470.xx / 390.xx / 340.xx) — there may be several
         for m in re.finditer(_LEGACY_PATTERN + r".{0,300}?" + _VER_RE, html, re.S):
             ver = m.group(1)
             if ver not in result["legacy"]:
@@ -94,9 +94,9 @@ def fetch_run_versions(timeout: int = 15) -> dict:
 
         result["online"] = bool(result["production"] or result["legacy"])
     except Exception:
-        pass  # brak internetu / zmiana strony — przechodzimy do fallbacku
+        pass  # no internet / page changed — we fall back
 
-    # Zapasowe źródło najnowszej wersji produkcyjnej
+    # Fallback source of the latest production version
     if not result["production"]:
         try:
             m = re.search(_VER_RE, _http_get(LATEST_TXT_URL, timeout))
@@ -106,7 +106,7 @@ def fetch_run_versions(timeout: int = 15) -> dict:
         except Exception:
             pass
 
-    # Ostateczny fallback — wersje wpisane w programie
+    # Final fallback — versions hardcoded in the program
     if not result["production"]:
         result["production"] = FALLBACK_VERSIONS["production"]
     if not result["legacy"]:
@@ -115,21 +115,21 @@ def fetch_run_versions(timeout: int = 15) -> dict:
 
 
 def nvidia_repo_url(distro: DistroInfo) -> str:
-    """Adres oficjalnego repozytorium APT NVIDIA dla danego wydania Debiana."""
+    """URL of the official NVIDIA APT repository for a given Debian release."""
     ver = re.search(r"\d+", distro.version or "")
     return f"{NVIDIA_REPO_BASE}/debian{ver.group(0) if ver else '13'}/x86_64"
 
 
 def keyring_url(distro: DistroInfo) -> str:
-    """Adres pakietu cuda-keyring dodającego podpisane repozytorium NVIDIA."""
+    """URL of the cuda-keyring package that adds the signed NVIDIA repository."""
     return nvidia_repo_url(distro) + "/cuda-keyring_1.1-1_all.deb"
 
 
 def open_module_flag(version: str) -> str:
-    """Flaga instalatora .run włączająca otwarte moduły jądra.
+    """The .run installer flag that enables open kernel modules.
 
-    Składnia zmieniała się między wersjami; starsze niż 515 nie mają
-    modułów otwartych w ogóle (zwracany pusty tekst).
+    The syntax changed between versions; ones older than 515 have no open
+    modules at all (an empty string is returned).
     """
     try:
         major = int(version.split(".")[0])
@@ -143,15 +143,15 @@ def open_module_flag(version: str) -> str:
 
 
 def _czysta_wersja(wersja: str) -> str:
-    """Sam numer wersji, bez epoki i rewizji pakietu (1:26.1.4-1 → 26.1.4)."""
+    """Just the version number, without epoch and package revision (1:26.1.4-1 → 26.1.4)."""
     return re.sub(r"^\d+:", "", wersja).split("-")[0]
 
 
 def get_mesa_version(distro: DistroInfo | None) -> str:
-    """Wersja Mesy dostępna w repozytorium dystrybucji (dla metody NVK).
+    """Mesa version available in the distribution repository (for the NVK method).
 
-    Zapytanie lokalnego menedżera pakietów — bez uprawnień administratora.
-    Pusty tekst, gdy nie da się ustalić (GUI/CLI po prostu nie pokażą wersji).
+    Queries the local package manager — without administrator privileges.
+    Empty string when it cannot be determined (the GUI/CLI simply won't show it).
     """
     if not distro:
         return ""
@@ -173,14 +173,14 @@ def get_mesa_version(distro: DistroInfo | None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Wersje dostępne w repozytorium dystrybucji
+# Versions available in the distribution repository
 # ---------------------------------------------------------------------------
 
 def get_repo_versions(distro: DistroInfo) -> list[dict]:
-    """Zwraca pakiety sterownika dostępne w repozytorium dystrybucji.
+    """Returns the driver packages available in the distribution repository.
 
-    Każdy element: {"pakiet": str, "wersja": str, "zalecany": bool}.
-    Pusta lista oznacza, że nie udało się nic wykryć.
+    Each item: {"pakiet": str, "wersja": str, "zalecany": bool}.
+    An empty list means nothing could be detected.
     """
     if distro.family == "arch":
         return _arch_repo_versions()
@@ -194,7 +194,7 @@ def get_repo_versions(distro: DistroInfo) -> list[dict]:
 
 
 def _arch_repo_versions() -> list[dict]:
-    """Arch: wersja pakietu nvidia-utils z oficjalnego repo."""
+    """Arch: version of the nvidia-utils package from the official repo."""
     code, out, _ = run(["pacman", "-Si", "nvidia-utils"], timeout=20)
     if code != 0:
         return []
@@ -204,13 +204,13 @@ def _arch_repo_versions() -> list[dict]:
 
 
 def _fedora_repo_versions() -> list[dict]:
-    """Fedora/Nobara: akmod-nvidia z RPMFusion (jeśli repo już włączone)."""
+    """Fedora/Nobara: akmod-nvidia from RPMFusion (if the repo is already enabled)."""
     code, out, _ = run(["dnf", "-q", "info", "akmod-nvidia"], timeout=40)
     if code == 0:
         m = re.search(r"^(?:Version|Wersja)\s*:\s*(\S+)", out, re.M)
         if m:
             return [{"pakiet": "akmod-nvidia", "wersja": m.group(1), "zalecany": True}]
-    # RPMFusion jeszcze nie włączone — program włączy je podczas instalacji
+    # RPMFusion not enabled yet — the program will enable it during installation
     return [
         {
             "pakiet": "akmod-nvidia",
@@ -221,31 +221,31 @@ def _fedora_repo_versions() -> list[dict]:
 
 
 def _nvidia_repo_latest(distro: DistroInfo, timeout: int = 15) -> str:
-    """Najnowsza wersja nvidia-open w oficjalnym repozytorium NVIDIA."""
+    """The latest nvidia-open version in the official NVIDIA repository."""
     try:
         tekst = _http_get(nvidia_repo_url(distro) + "/", timeout)
         vers = re.findall(r"nvidia-open_(\d+\.\d+(?:\.\d+)?)-\d+_amd64\.deb", tekst)
         if vers:
             return max(vers, key=lambda v: tuple(int(x) for x in v.split(".")))
     except Exception:
-        pass  # brak internetu / zmiana układu strony — wersja pozostaje nieznana
+        pass  # no internet / page layout changed — version stays unknown
     return ""
 
 
 def _debian_repo_versions(distro: DistroInfo) -> list[dict]:
-    """Czysty Debian: dwa źródła — sekcja non-free i oficjalne repo NVIDIA.
+    """Plain Debian: two sources — the non-free section and the official NVIDIA repo.
 
-    Repozytorium Debiana kończy się na serii 550, która nie obsługuje kart
-    RTX 50xx — dla nich potrzebne jest oficjalne repozytorium NVIDIA.
-    O tym, które źródło jest zalecane, decyduje GUI na podstawie karty.
+    The Debian repository ends at series 550, which does not support RTX 50xx
+    cards — for those the official NVIDIA repository is needed.
+    Which source is recommended is decided by the GUI based on the card.
     """
     code, out, _ = run(["apt-cache", "policy", "nvidia-driver"], timeout=20)
     m = re.search(r"(?:Candidate|Kandydująca)\s*:\s*(\S+)", out) if code == 0 else None
-    # Brak kandydata to "(none)" / "(brak)" — zależnie od języka systemu
+    # No candidate is "(none)" / "(brak)" — depending on the system language
     if m and not m.group(1).startswith("("):
         debian_ver = m.group(1)
     else:
-        # Sekcja non-free nie jest jeszcze włączona — stanie się to przy instalacji
+        # The non-free section is not enabled yet — it will be during installation
         debian_ver = "najnowsza z non-free (sekcja zostanie włączona automatycznie)"
 
     nvidia_ver = _nvidia_repo_latest(distro)
@@ -267,8 +267,8 @@ def _debian_repo_versions(distro: DistroInfo) -> list[dict]:
 
 
 def _ubuntu_repo_versions() -> list[dict]:
-    """Kubuntu/Mint: lista pakietów nvidia-driver-XXX + zalecany z ubuntu-drivers."""
-    # Pakiet zalecany przez narzędzie ubuntu-drivers (jeśli dostępne)
+    """Kubuntu/Mint: list of nvidia-driver-XXX packages + the one recommended by ubuntu-drivers."""
+    # Package recommended by the ubuntu-drivers tool (if available)
     recommended = ""
     if which("ubuntu-drivers"):
         _, out, _ = run(["ubuntu-drivers", "devices"], timeout=40)
@@ -276,7 +276,7 @@ def _ubuntu_repo_versions() -> list[dict]:
         if m:
             recommended = m.group(1)
 
-    # Wszystkie dostępne metapakiety sterownika (też w wariancie -open)
+    # All available driver metapackages (also in the -open variant)
     code, out, _ = run(
         ["apt-cache", "search", "--names-only", r"^nvidia-driver-[0-9]+(-open)?$"],
         timeout=30,
@@ -285,7 +285,7 @@ def _ubuntu_repo_versions() -> list[dict]:
         return []
     pkgs = sorted(
         {m.group(0) for m in re.finditer(r"nvidia-driver-\d+(?:-open)?", out)},
-        # Sortowanie: najnowsza seria najpierw, wariant zwykły przed -open
+        # Sort: newest series first, regular variant before -open
         key=lambda p: (-int(re.search(r"\d+", p).group(0)), p.endswith("-open")),
     )
     wyniki = []

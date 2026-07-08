@@ -1,19 +1,19 @@
 # -*- coding: utf-8 -*-
-"""Motywy graficzne: jasny i ciemny, z zielonym akcentem NVIDIA (#76b900)."""
+"""Graphical themes: light and dark, with the NVIDIA green accent (#76b900)."""
 from __future__ import annotations
 
-# Kolor akcentu wspólny dla obu motywów
+# Accent color shared by both themes
 ACCENT = "#76b900"
 ACCENT_HOVER = "#8fd400"
 ACCENT_PRESSED = "#5e9400"
 
-# Palety kolorów obu motywów
+# Color palettes for both themes
 _DARK = {
-    "bg": "#1e1f22",         # tło główne
-    "bg_alt": "#26282c",     # tło paneli / grup
-    "bg_input": "#2d2f34",   # pola, listy
-    "fg": "#e8e8e8",         # tekst podstawowy
-    "fg_dim": "#9a9a9a",     # tekst drugorzędny
+    "bg": "#1e1f22",         # main background
+    "bg_alt": "#26282c",     # panel / group background
+    "bg_input": "#2d2f34",   # fields, lists
+    "fg": "#e8e8e8",         # primary text
+    "fg_dim": "#9a9a9a",     # secondary text
     "border": "#3c3f45",
     "sidebar": "#17181a",
     "selection_fg": "#101010",
@@ -31,10 +31,10 @@ _LIGHT = {
 
 
 def build_qss(dark: bool) -> str:
-    """Buduje arkusz stylów QSS dla wybranego motywu."""
+    """Builds the QSS stylesheet for the selected theme."""
     c = _DARK if dark else _LIGHT
     return f"""
-/* ---------- Podstawa ---------- */
+/* ---------- Base ---------- */
 QWidget {{
     background-color: {c['bg']};
     color: {c['fg']};
@@ -49,7 +49,7 @@ QLabel#header {{
 }}
 QLabel#dim {{ color: {c['fg_dim']}; background: transparent; }}
 
-/* ---------- Panele / grupy ---------- */
+/* ---------- Panels / groups ---------- */
 QGroupBox {{
     background-color: {c['bg_alt']};
     border: 1px solid {c['border']};
@@ -65,7 +65,7 @@ QGroupBox::title {{
     color: {ACCENT};
 }}
 
-/* ---------- Przyciski ---------- */
+/* ---------- Buttons ---------- */
 QPushButton {{
     background-color: {c['bg_input']};
     border: 1px solid {c['border']};
@@ -87,7 +87,7 @@ QPushButton#primary:hover {{ background-color: {ACCENT_HOVER}; }}
 QPushButton#primary:pressed {{ background-color: {ACCENT_PRESSED}; }}
 QPushButton#primary:disabled {{ background-color: {c['border']}; color: {c['fg_dim']}; }}
 
-/* ---------- Pola wyboru / edycji ---------- */
+/* ---------- Selection / edit fields ---------- */
 QComboBox, QLineEdit {{
     background-color: {c['bg_input']};
     border: 1px solid {c['border']};
@@ -105,7 +105,7 @@ QRadioButton, QCheckBox {{ background: transparent; spacing: 8px; }}
 QRadioButton:disabled, QCheckBox:disabled {{ color: {c['fg_dim']}; }}
 QRadioButton:checked {{ color: {ACCENT}; font-weight: bold; }}
 
-/* Wyraźne wskaźniki wyboru — szary pierścień, po zaznaczeniu zielona kropka */
+/* Clear selection indicators — a gray ring, a green dot when checked */
 QRadioButton::indicator {{
     width: 16px; height: 16px;
     border-radius: 10px;
@@ -139,7 +139,7 @@ QCheckBox::indicator:disabled {{
     background-color: {c['bg_alt']};
 }}
 
-/* Ramka metody instalacji — podświetla cały wiersz wybranej metody */
+/* Installation method frame — highlights the whole row of the selected method */
 QFrame#methodRow {{
     border: 1px solid transparent;
     border-left: 4px solid transparent;
@@ -151,7 +151,7 @@ QFrame#methodRow[selected="true"] {{
     border-left: 4px solid {ACCENT};
 }}
 
-/* ---------- Pasek postępu ---------- */
+/* ---------- Progress bar ---------- */
 QProgressBar {{
     background-color: {c['bg_input']};
     border: 1px solid {c['border']};
@@ -164,7 +164,7 @@ QProgressBar::chunk {{
     border-radius: 5px;
 }}
 
-/* ---------- Log / tabele / drzewa ---------- */
+/* ---------- Log / tables / trees ---------- */
 QTextEdit, QPlainTextEdit {{
     background-color: {c['bg_input']};
     border: 1px solid {c['border']};
@@ -191,7 +191,7 @@ QTableWidget::item:selected, QTreeWidget::item:selected {{
     color: {c['selection_fg']};
 }}
 
-/* ---------- Pasek boczny ---------- */
+/* ---------- Sidebar ---------- */
 QListWidget#sidebar {{
     background-color: {c['sidebar']};
     border: none;
@@ -210,7 +210,7 @@ QListWidget#sidebar::item:selected {{
     font-weight: bold;
 }}
 
-/* ---------- Suwaki ---------- */
+/* ---------- Scrollbars ---------- */
 QScrollBar:vertical {{
     background: {c['bg']};
     width: 10px;
@@ -235,5 +235,5 @@ QToolTip {{
 
 
 def apply_theme(app, name: str) -> None:
-    """Nakłada motyw ("dark" lub "light") na całą aplikację."""
+    """Applies the theme ("dark" or "light") to the whole application."""
     app.setStyleSheet(build_qss(dark=(name != "light")))

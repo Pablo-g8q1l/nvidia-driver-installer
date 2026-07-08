@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Monitor GPU w czasie rzeczywistym — odpytuje nvidia-smi co 2 sekundy."""
+"""Real-time GPU monitor — polls nvidia-smi every 2 seconds."""
 from __future__ import annotations
 
 from PySide6.QtCore import QThread, Signal
@@ -8,7 +8,7 @@ from app.i18n import tr
 
 from .utils import run
 
-# Pola pobierane z nvidia-smi (kolejność musi zgadzać się z parsowaniem)
+# Fields fetched from nvidia-smi (order must match the parsing)
 _QUERY_FIELDS = (
     "name,driver_version,temperature.gpu,utilization.gpu,"
     "memory.used,memory.total,power.draw,power.limit,fan.speed"
@@ -16,7 +16,7 @@ _QUERY_FIELDS = (
 
 
 def _to_float(value: str) -> float | None:
-    """Zamienia pole nvidia-smi na liczbę; '[N/A]' i śmieci → None."""
+    """Converts an nvidia-smi field to a number; '[N/A]' and junk → None."""
     try:
         return float(value.strip())
     except (ValueError, AttributeError):
@@ -24,7 +24,7 @@ def _to_float(value: str) -> float | None:
 
 
 def query_gpu_stats() -> dict | None:
-    """Jednorazowy odczyt statystyk pierwszego GPU. None gdy niedostępne."""
+    """One-off read of the first GPU's stats. None when unavailable."""
     code, out, _ = run(
         ["nvidia-smi", f"--query-gpu={_QUERY_FIELDS}",
          "--format=csv,noheader,nounits"],
@@ -49,22 +49,22 @@ def query_gpu_stats() -> dict | None:
 
 
 class MonitorThread(QThread):
-    """Cyklicznie odczytuje statystyki GPU i wysyła je sygnałem do GUI."""
+    """Periodically reads GPU stats and sends them to the GUI via a signal."""
 
-    sig_data = Signal(dict)   # świeże statystyki GPU
-    sig_error = Signal(str)   # komunikat, gdy monitorowanie niemożliwe
+    sig_data = Signal(dict)   # fresh GPU stats
+    sig_error = Signal(str)   # message when monitoring is impossible
 
-    INTERVAL_MS = 2000  # odstęp między odczytami
+    INTERVAL_MS = 2000  # interval between reads
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._running = True
 
     def stop(self) -> None:
-        """Zatrzymuje pętlę monitorowania (wywoływane przy zmianie zakładki)."""
+        """Stops the monitoring loop (called when switching tabs)."""
         self._running = False
 
-    def run(self):  # noqa: D102 — metoda QThread
+    def run(self):  # noqa: D102 — QThread method
         error_sent = False
         while self._running:
             stats = query_gpu_stats()
@@ -72,13 +72,13 @@ class MonitorThread(QThread):
                 self.sig_data.emit(stats)
                 error_sent = False
             elif not error_sent:
-                # Komunikat wysyłamy raz — np. przy NVK nvidia-smi nie istnieje
+                # The message is sent once — e.g. with NVK nvidia-smi does not exist
                 self.sig_error.emit(
                     tr("Monitor wymaga sterownika NVIDIA (nvidia-smi). Przy NVK /"
                        " nouveau statystyki nie są dostępne.")
                 )
                 error_sent = True
-            # Krótkie drzemki, by stop() działał bez opóźnień
+            # Short naps so that stop() works without delays
             for _ in range(self.INTERVAL_MS // 100):
                 if not self._running:
                     break

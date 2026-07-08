@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Historia instalacji: wpisy w pliku JSON + pełne logi w osobnych plikach."""
+"""Installation history: entries in a JSON file + full logs in separate files."""
 from __future__ import annotations
 
 import json
@@ -11,7 +11,7 @@ from .utils import DATA_DIR, LOG_DIR, ensure_dirs
 
 HISTORY_FILE = DATA_DIR / "history.json"
 
-# Czytelne nazwy metod instalacji do wyświetlania
+# Human-readable installation method names for display
 METHOD_NAMES = {
     "nvk": "NVK / Mesa (open source)",
     "repo": "Repozytorium dystrybucji",
@@ -20,7 +20,7 @@ METHOD_NAMES = {
 
 
 def load_history() -> list[dict]:
-    """Wczytuje wpisy historii (najnowsze na początku listy)."""
+    """Loads history entries (newest at the beginning of the list)."""
     try:
         data = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
         if isinstance(data, list):
@@ -39,7 +39,7 @@ def _save_history(entries: list[dict]) -> None:
 
 def add_entry(metoda: str, wersja: str, dystrybucja: str, status: str,
               log_text: str) -> dict:
-    """Dodaje wpis historii i zapisuje pełny log do osobnego pliku."""
+    """Adds a history entry and saves the full log to a separate file."""
     ensure_dirs()
     ts = datetime.now()
     log_name = f"instalacja-{ts.strftime('%Y%m%d-%H%M%S')}.log"
@@ -47,7 +47,7 @@ def add_entry(metoda: str, wersja: str, dystrybucja: str, status: str,
     try:
         log_path.write_text(log_text, encoding="utf-8")
     except OSError:
-        log_name = ""  # log niezapisany, ale wpis historii i tak powstaje
+        log_name = ""  # log not saved, but the history entry is created anyway
 
     entry = {
         "data": ts.strftime("%Y-%m-%d %H:%M:%S"),
@@ -58,13 +58,13 @@ def add_entry(metoda: str, wersja: str, dystrybucja: str, status: str,
         "log": log_name,
     }
     entries = load_history()
-    entries.insert(0, entry)  # najnowsze na górze
+    entries.insert(0, entry)  # newest on top
     _save_history(entries)
     return entry
 
 
 def read_log(entry: dict) -> str:
-    """Zwraca pełny log dla wpisu historii (lub komunikat o braku)."""
+    """Returns the full log for a history entry (or a not-found message)."""
     name = entry.get("log", "")
     if not name:
         return tr("Brak zapisanego logu dla tego wpisu.")
@@ -75,7 +75,7 @@ def read_log(entry: dict) -> str:
 
 
 def clear_history() -> None:
-    """Usuwa wszystkie wpisy historii wraz z plikami logów."""
+    """Removes all history entries along with their log files."""
     for entry in load_history():
         name = entry.get("log", "")
         if name:
