@@ -1,0 +1,656 @@
+# -*- coding: utf-8 -*-
+"""Strona instalacji sterownika — wybór metody, opcji i przebieg instalacji."""
+from __future__ import annotations
+
+import os
+import subprocess
+
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtWidgets import (
+    QButtonGroup, QCheckBox, QComboBox, QFrame, QGroupBox, QHBoxLayout,
+    QInputDialog, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton,
+    QRadioButton, QTextEdit, QVBoxLayout, QWidget,
+)
+
+from app.core import nvidia_versions
+from app.core.gpu import (
+    driver_description, is_blackwell_or_newer, is_turing_or_newer,
+    recommended_driver_info,
+)
+from app.core.installer import InstallOptions, InstallThread
+from app.core.utils import is_linux, which
+from app.i18n import tr
+
+
+def _tr_step(label: str) -> str:
+    """Tłumaczy etykietę kroku instalacji.
+
+    Etykiety z dynamiczną końcówką w nawiasie (np. nazwą pakietu sterownika,
+    której nie ma w słowniku) tłumaczone są po samym przedrostku.
+    """
+    t = tr(label)
+    if t == label and label.endswith(")") and " (" in label:
+        prefix, _, rest = label.rpartition(" (")
+        return tr(prefix) + f" ({rest}"
+    return t
+
+
+class VersionThread(QThread):
+    """Pobiera w tle dostępne wersje sterowników (internet + repozytorium)."""
+
+    # wersje .run, wersje z repozytorium, wersja Mesy (dla metody NVK)
+    sig_versions = Signal(dict, list, str)
+
+    def __init__(self, distro, parent=None):
+        super().__init__(parent)
+        self._distro = distro
+
+    def run(self):  # noqa: D102
+        run_versions = nvidia_versions.fetch_run_versions()
+        repo_versions = (
+            nvidia_versions.get_repo_versions(self._distro) if self._distro else []
+        )
+        mesa_version = nvidia_versions.get_mesa_version(self._distro)
+        self.sig_versions.emit(run_versions, repo_versions, mesa_version)
+
+
+class InstallPage(QWidget):
+    """Główna strona programu: wykryty system + w pełni automatyczna instalacja."""
+
+    sig_system_changed = Signal()  # po instalacji — główne okno odświeża wykrywanie
+
+    def __init__(self, cfg: dict | None = None, parent=None):
+        super().__init__(parent)
+        self._cfg = cfg if cfg is not None else {}  # ustawienia programu (m.in. boot_report)
+        self._state: dict = {}          # wynik wykrywania z main_window
+        self._install_thread = None
+        self._version_thread = None
+        self._build_ui()
+
+    # ------------------------------------------------------------------ UI
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        # --- Wykryty system -------------------------------------------------
+        box_sys = QGroupBox(tr("Wykryty system"))
+        sys_lay = QVBoxLayout(box_sys)
+        self.lbl_distro = QLabel(tr("Dystrybucja: wykrywanie..."))
+        self.lbl_gpu = QLabel(tr("Karta graficzna: wykrywanie..."))
+        self.lbl_driver = QLabel(tr("Obecny sterownik: wykrywanie..."))
+        # Jądro znane od razu (os.uname), bez wykrywania w tle
+        kernel = os.uname().release if is_linux() else "—"
+        self.lbl_kernel = QLabel(f"{tr('Uruchomione jądro')}: {kernel}")
+        for lbl in (self.lbl_distro, self.lbl_gpu, self.lbl_driver,
+                    self.lbl_kernel):
+            sys_lay.addWidget(lbl)
+        layout.addWidget(box_sys)
+
+        # --- Metoda instalacji ----------------------------------------------
+        box_method = QGroupBox(tr("Metoda instalacji"))
+        m_lay = QVBoxLayout(box_method)
+        self.rb_repo = QRadioButton(tr("Repozytorium dystrybucji (zalecane)"))
+        self.rb_run = QRadioButton(tr("Plik .run z serwerów NVIDIA"))
+        self.rb_nvk = QRadioButton(tr("NVK — sterownik open source (Mesa)"))
+        self.rb_repo.setChecked(True)
+
+        self._btn_group = QButtonGroup(self)
+        for rb in (self.rb_repo, self.rb_run, self.rb_nvk):
+            self._btn_group.addButton(rb)
+            rb.toggled.connect(self._update_method_widgets)
+
+        def _method_frame(radio: QRadioButton, sub_row: QHBoxLayout) -> QFrame:
+            """Ramka jednej metody — podświetlana, gdy metoda jest wybrana."""
+            frame = QFrame()
+            frame.setObjectName("methodRow")
+            frame.setProperty("selected", False)
+            f_lay = QVBoxLayout(frame)
+            f_lay.setContentsMargins(10, 8, 10, 8)
+            f_lay.setSpacing(4)
+            f_lay.addWidget(radio)
+            f_lay.addLayout(sub_row)
+            return frame
+
+        # Repozytorium: wykryta wersja / wybór pakietu (Kubuntu/Mint)
+        repo_row = QHBoxLayout()
+        repo_row.addSpacing(24)
+        self.lbl_repo_info = QLabel(tr("Sprawdzanie dostępnej wersji..."))
+        self.lbl_repo_info.setObjectName("dim")
+        self.combo_repo = QComboBox()
+        self.combo_repo.setVisible(False)
+        self.combo_repo.setMinimumWidth(280)
+        # Na czystym Debianie lista wybiera źródło (Debian / repo NVIDIA),
+        # od którego zależy dostępność otwartych modułów jądra
+        self.combo_repo.currentIndexChanged.connect(self._update_open_checkbox)
+        repo_row.addWidget(self.lbl_repo_info)
+        repo_row.addWidget(self.combo_repo)
+        repo_row.addStretch()
+        self._frame_repo = _method_frame(self.rb_repo, repo_row)
+        m_lay.addWidget(self._frame_repo)
+
+        # Plik .run: wybór gałęzi (Production / New Feature / Beta / Legacy)
+        run_row = QHBoxLayout()
+        run_row.addSpacing(24)
+        self.combo_run = QComboBox()
+        self.combo_run.setMinimumWidth(280)
+        self.combo_run.addItem(tr("Pobieranie listy wersji..."), "")
+        self.combo_run.currentIndexChanged.connect(self._update_open_checkbox)
+        run_row.addWidget(self.combo_run)
+        self.lbl_run_warn = QLabel("")
+        self.lbl_run_warn.setObjectName("dim")
+        run_row.addWidget(self.lbl_run_warn)
+        run_row.addStretch()
+        self._frame_run = _method_frame(self.rb_run, run_row)
+        m_lay.addWidget(self._frame_run)
+
+        # NVK
+        nvk_row = QHBoxLayout()
+        nvk_row.addSpacing(24)
+        self.lbl_nvk = QLabel(
+            tr("Bez komponentów NVIDIA, pełne wsparcie Wayland. Najlepiej działa"
+               " na kartach RTX 20xx i nowszych.")
+        )
+        self.lbl_nvk.setObjectName("dim")
+        self.lbl_nvk.setWordWrap(True)
+        nvk_row.addWidget(self.lbl_nvk)
+        self._frame_nvk = _method_frame(self.rb_nvk, nvk_row)
+        m_lay.addWidget(self._frame_nvk)
+
+        # Otwarte moduły jądra
+        self.chk_open = QCheckBox(
+            tr("Otwarte moduły jądra (open kernel modules) — RTX 20xx i nowsze")
+        )
+        m_lay.addWidget(self.chk_open)
+        layout.addWidget(box_method)
+
+        # --- Przycisk instalacji ---------------------------------------------
+        self.btn_install = QPushButton(tr("ZAINSTALUJ STEROWNIK"))
+        self.btn_install.setObjectName("primary")
+        self.btn_install.setMinimumHeight(48)
+        self.btn_install.clicked.connect(self._start_install)
+        layout.addWidget(self.btn_install)
+
+        # --- Postęp i log ------------------------------------------------------
+        self.lbl_step = QLabel("")
+        self.lbl_step.setObjectName("dim")
+        layout.addWidget(self.lbl_step)
+        self.progress = QProgressBar()
+        self.progress.setValue(0)
+        layout.addWidget(self.progress)
+        self.log = QTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setMinimumHeight(140)
+        self.log.setPlaceholderText(
+            tr("Tutaj pojawi się szczegółowy przebieg instalacji...")
+        )
+        layout.addWidget(self.log, stretch=1)
+
+        self._update_method_widgets()
+
+    # ------------------------------------------------------ stan systemu
+    def set_system_state(self, state: dict) -> None:
+        """Aktualizuje stronę po wykryciu systemu (wywołuje main_window)."""
+        self._state = state
+        distro = state.get("distro")
+        gpus = state.get("gpus", [])
+        driver = state.get("driver", {})
+
+        if distro:
+            txt = f"{tr('Dystrybucja')}: {distro.name}"
+            if not distro.supported:
+                txt += "  ⚠ " + tr("(nieobsługiwana — instalacja zablokowana)")
+            self.lbl_distro.setText(txt)
+        if gpus:
+            self.lbl_gpu.setText(
+                f"{tr('Karta graficzna')}: " + ", ".join(g.name for g in gpus)
+            )
+        else:
+            self.lbl_gpu.setText(
+                f"{tr('Karta graficzna')}: " + tr("nie wykryto karty NVIDIA")
+            )
+        self.lbl_driver.setText(
+            f"{tr('Obecny sterownik')}: {driver_description(driver)}"
+        )
+
+        # Instalacja możliwa tylko na obsługiwanym Linuksie z kartą NVIDIA
+        can_install = bool(distro and distro.supported and is_linux())
+        self.btn_install.setEnabled(can_install)
+        if not is_linux():
+            self.lbl_step.setText(
+                tr("Tryb podglądu — instalacja dostępna tylko na Linuksie.")
+            )
+
+        # Domyślnie zaznaczona metoda odpowiadająca sterownikowi obecnemu
+        # w systemie; gdy sterownika nie ma — zostaje zalecane repozytorium
+        typ = driver.get("typ", "")
+        if typ == "nouveau":
+            self.rb_nvk.setChecked(True)
+        elif typ in ("proprietary", "open-kernel"):
+            if driver.get("zrodlo") == "plik .run":
+                self.rb_run.setChecked(True)
+            else:
+                self.rb_repo.setChecked(True)
+
+        # Domyślny stan checkboxa otwartych modułów zależnie od GPU
+        turing = any(is_turing_or_newer(g.name) for g in gpus)
+        self.chk_open.setChecked(turing)
+
+        # NVK na czystym Debianie z RTX 50xx wymaga backportów — informacja
+        # przy metodzie, żeby nowe jądro nie było niespodzianką
+        opis_nvk = tr(
+            "Bez komponentów NVIDIA, pełne wsparcie Wayland. Najlepiej działa"
+            " na kartach RTX 20xx i nowszych."
+        )
+        if self._nvk_needs_backports():
+            opis_nvk += " " + tr(
+                "Na RTX 50xx program zainstaluje nowsze jądro, Mesę i firmware"
+                " z oficjalnych backportów Debiana."
+            )
+        self._opis_nvk = opis_nvk  # baza — wersja Mesy dojdzie po pobraniu
+        self.lbl_nvk.setText(opis_nvk)
+        self._update_method_widgets()
+
+        # Pobranie dostępnych wersji w tle
+        self._version_thread = VersionThread(distro, self)
+        self._version_thread.sig_versions.connect(self._on_versions)
+        self._version_thread.start()
+
+    # ------------------------------------------------------ wersje sterownika
+    def _on_versions(self, run_versions: dict, repo_versions: list,
+                     mesa_version: str = "") -> None:
+        """Wypełnia listy wersji po pobraniu danych w tle.
+
+        Dodatkowo dobiera zalecaną gałąź do architektury wykrytej karty:
+        oznacza ją gwiazdką, ustawia jako domyślną i ostrzega przy gałęziach,
+        które karty nie obsługują (np. najnowszy sterownik a karta Kepler).
+        """
+        # Wersja Mesy przy opisie metody NVK (odpowiednik wersji przy repo/run)
+        if mesa_version:
+            self.lbl_nvk.setText(
+                getattr(self, "_opis_nvk", self.lbl_nvk.text())
+                + f"\n{tr('Wykryta wersja:')} Mesa {mesa_version}"
+            )
+        gpus = self._state.get("gpus", [])
+        # Rekomendacja liczona dla pierwszej karty (najczęstszy przypadek)
+        rec = (
+            recommended_driver_info(gpus[0].name) if gpus
+            else {"arch": "", "legacy": None, "max_major": None}
+        )
+
+        # Gałęzie .run
+        self.combo_run.clear()
+        rec_index = -1
+        branches = [
+            ("production", tr("Production (stabilna)")),
+            ("new_feature", tr("New Feature")),
+            ("beta", tr("Beta")),
+        ]
+        for key, label in branches:
+            ver = run_versions.get(key)
+            if not ver:
+                continue
+            try:
+                major = int(ver.split(".")[0])
+            except ValueError:
+                major = 0
+            text = f"{label} — {ver}"
+            if rec["legacy"]:
+                # Stara karta — nowe gałęzie jej nie obsługują
+                text += "  ⚠ " + tr("(nie obsługuje Twojej karty)")
+            elif rec["max_major"] and major > rec["max_major"]:
+                # Np. Maxwell/Pascal: gałęzie nowsze niż 580 mogą nie wspierać
+                text += "  ⚠ " + tr("(może nie wspierać Twojej karty)")
+            elif gpus and key == "production" and rec_index < 0:
+                text += "  ★ " + tr("(zalecana dla Twojej karty)")
+                rec_index = self.combo_run.count()
+            self.combo_run.addItem(text, ver)
+
+        for ver in run_versions.get("legacy", []):
+            seria = ver.split(".")[0]
+            text = f"{tr('Legacy')} {seria}.xx — {ver}"
+            if rec["legacy"] == seria:
+                text += "  ★ " + tr("(zalecana dla Twojej karty)")
+                rec_index = self.combo_run.count()
+            self.combo_run.addItem(text, ver)
+        if rec_index >= 0:
+            self.combo_run.setCurrentIndex(rec_index)
+        if not run_versions.get("online"):
+            self.combo_run.addItem(
+                tr("(brak internetu — wersje zapasowe)"), ""
+            )
+
+        # Informacja o wykrytej architekturze obok listy gałęzi
+        # (nazwy własne jak Kepler/Fermi tr() przepuszcza bez zmian)
+        if rec["arch"]:
+            self.lbl_run_warn.setText(
+                tr("Architektura karty:") + f" {tr(rec['arch'])}"
+            )
+
+        # Repozytorium
+        distro = self._state.get("distro")
+        if repo_versions:
+            if distro and distro.ubuntu_based and len(repo_versions) > 1:
+                # Kubuntu / Mint: użytkownik wybiera serię sterownika z listy
+                self.lbl_repo_info.setText(tr("Dostępne wersje:"))
+                self.combo_repo.setVisible(True)
+                self.combo_repo.clear()
+                for rv in repo_versions:
+                    label = rv["pakiet"]
+                    if rv["zalecany"]:
+                        label += " ★ " + tr("(zalecany)")
+                    self.combo_repo.addItem(label, rv["pakiet"])
+                    if rv["zalecany"]:
+                        self.combo_repo.setCurrentIndex(self.combo_repo.count() - 1)
+            elif (
+                distro and distro.family == "debian" and len(repo_versions) > 1
+            ):
+                # Czysty Debian: wybór źródła pakietów. Repo Debiana kończy
+                # się na serii 550, więc dla RTX 50xx zalecane (i konieczne)
+                # jest oficjalne repozytorium NVIDIA.
+                blackwell = any(is_blackwell_or_newer(g.name) for g in gpus)
+                self.lbl_repo_info.setText(tr("Źródło pakietów:"))
+                self.combo_repo.setVisible(True)
+                self.combo_repo.clear()
+                for rv in repo_versions:
+                    src = rv.get("zrodlo", "debian")
+                    if src == "nvidia":
+                        label = (tr("Repozytorium NVIDIA")
+                                 + f" — {rv['pakiet']} ({rv['wersja']})")
+                        if blackwell:
+                            label += "  ★ " + tr("(wymagane dla RTX 50xx)")
+                    else:
+                        label = (tr("Repozytorium Debiana")
+                                 + f" — {rv['pakiet']} ({rv['wersja']})")
+                        if blackwell:
+                            label += "  ⚠ " + tr("(nie obsługuje RTX 50xx)")
+                        else:
+                            label += "  ★ " + tr("(zalecane)")
+                    self.combo_repo.addItem(label, src)
+                    if (src == "nvidia") == blackwell:
+                        self.combo_repo.setCurrentIndex(self.combo_repo.count() - 1)
+            else:
+                rv = repo_versions[0]
+                self.lbl_repo_info.setText(
+                    tr("Wykryta wersja:") + f" {rv['pakiet']} ({rv['wersja']})"
+                )
+        else:
+            self.lbl_repo_info.setText(
+                tr("Nie udało się wykryć wersji w repozytorium.")
+            )
+
+        # Stara karta: najnowszy sterownik z repozytorium jej nie obsłuży
+        if rec["legacy"]:
+            self.lbl_repo_info.setText(
+                self.lbl_repo_info.text()
+                + "\n⚠ " + tr("Twoja karta wymaga gałęzi Legacy")
+                + f" {rec['legacy']}.xx — "
+                + tr("najnowszy sterownik z repozytorium może jej nie"
+                     " obsługiwać. Najbezpieczniejsza jest metoda .run"
+                     " z zalecaną wersją.")
+            )
+
+    # ------------------------------------------------------ logika opcji
+    def _update_method_widgets(self) -> None:
+        """Włącza/wyłącza widżety zależnie od wybranej metody instalacji."""
+        self.combo_run.setEnabled(self.rb_run.isChecked())
+        self.combo_repo.setEnabled(self.rb_repo.isChecked())
+
+        # Podświetlenie ramki wybranej metody (właściwość czyta arkusz QSS)
+        for frame, rb in (
+            (self._frame_repo, self.rb_repo),
+            (self._frame_run, self.rb_run),
+            (self._frame_nvk, self.rb_nvk),
+        ):
+            frame.setProperty("selected", rb.isChecked())
+            # Wymuszenie ponownego nałożenia stylu po zmianie właściwości
+            frame.style().unpolish(frame)
+            frame.style().polish(frame)
+
+        self._update_open_checkbox()
+
+    def _update_open_checkbox(self) -> None:
+        """Reguły dostępności otwartych modułów jądra dla bieżącej metody."""
+        gpus = self._state.get("gpus", [])
+        distro = self._state.get("distro")
+        turing = any(is_turing_or_newer(g.name) for g in gpus)
+
+        if self.rb_nvk.isChecked():
+            # NVK sam w sobie jest otwarty — checkbox nie ma zastosowania
+            self.chk_open.setEnabled(False)
+            self.chk_open.setToolTip(tr("NVK jest w całości open source."))
+            return
+        if any(is_blackwell_or_newer(g.name) for g in gpus):
+            # Blackwell (RTX 50xx+) działa wyłącznie z modułami otwartymi —
+            # zamknięte moduły nie obsługują tych kart, więc wymuszamy wybór
+            self.chk_open.setEnabled(False)
+            self.chk_open.setChecked(True)
+            self.chk_open.setToolTip(
+                tr("Karty RTX 50xx i nowsze działają wyłącznie z otwartymi"
+                   " modułami jądra — wybór jest wymuszony.")
+            )
+            return
+        if not turing and gpus:
+            self.chk_open.setEnabled(False)
+            self.chk_open.setChecked(False)
+            self.chk_open.setToolTip(
+                tr("Otwarte moduły wymagają karty RTX 20xx lub nowszej.")
+            )
+            return
+        if (
+            self.rb_repo.isChecked()
+            and distro is not None
+            and distro.family == "debian"
+            and not distro.ubuntu_based
+            and self.combo_repo.currentData() != "nvidia"
+        ):
+            # Repozytorium Debiana nie ma prostego wariantu open —
+            # ma go dopiero oficjalne repozytorium NVIDIA (nvidia-open)
+            self.chk_open.setEnabled(False)
+            self.chk_open.setChecked(False)
+            self.chk_open.setToolTip(
+                tr("Repozytorium Debiana nie oferuje wariantu open — wybierz"
+                   " źródło Repozytorium NVIDIA albo metodę .run.")
+            )
+            return
+        if self.rb_run.isChecked():
+            # Stare gałęzie (Legacy < 515) nie mają modułów otwartych
+            ver = self.combo_run.currentData() or ""
+            if ver and not nvidia_versions.open_module_flag(ver):
+                self.chk_open.setEnabled(False)
+                self.chk_open.setChecked(False)
+                self.chk_open.setToolTip(
+                    tr("Ta wersja sterownika nie obsługuje modułów otwartych.")
+                )
+                return
+        self.chk_open.setEnabled(True)
+        self.chk_open.setToolTip("")
+
+    def _nvk_needs_backports(self) -> bool:
+        """Czy NVK wymaga backportów: czysty Debian + karta RTX 50xx.
+
+        Stabilny Debian ma za stare jądro (nouveau bez GB20x), Mesę < 25.2
+        (NVK bez Blackwella) i firmware bez GSP r570.
+        """
+        distro = self._state.get("distro")
+        gpus = self._state.get("gpus", [])
+        return bool(
+            distro
+            and distro.family == "debian"
+            and not distro.ubuntu_based
+            and any(is_blackwell_or_newer(g.name) for g in gpus)
+        )
+
+    def _selected_method(self) -> str:
+        if self.rb_nvk.isChecked():
+            return "nvk"
+        if self.rb_run.isChecked():
+            return "run"
+        return "repo"
+
+    # ------------------------------------------------------ instalacja
+    def _start_install(self) -> None:
+        """Potwierdzenie i uruchomienie w pełni automatycznej instalacji."""
+        distro = self._state.get("distro")
+        if not distro or not distro.supported:
+            return
+        method = self._selected_method()
+
+        opts = InstallOptions(method=method, distro=distro,
+                              open_modules=self.chk_open.isChecked(),
+                              boot_report=bool(self._cfg.get("boot_report", False)))
+        opis = {
+            "nvk": tr("NVK — sterownik open source (Mesa)"),
+            "repo": tr("Repozytorium dystrybucji (zalecane)"),
+            "run": tr("Plik .run z serwerów NVIDIA"),
+        }[method]
+
+        if method == "nvk" and self._nvk_needs_backports():
+            opts.use_backports = True
+            opis += "\n\n" + tr(
+                "Karta RTX 50xx: jądro, Mesa i firmware zostaną"
+                " zainstalowane z oficjalnych backportów Debiana."
+            )
+        elif method == "run":
+            opts.run_version = self.combo_run.currentData() or ""
+            if not opts.run_version:
+                QMessageBox.warning(
+                    self, tr("Brak wersji"),
+                    tr("Nie wybrano wersji sterownika do pobrania."),
+                )
+                return
+            opis += f" ({opts.run_version})"
+            # Ostrzeżenie dla starych gałęzi Legacy
+            try:
+                if int(opts.run_version.split(".")[0]) < 470:
+                    opis += "\n\n⚠ " + tr(
+                        "Gałęzie Legacy mogą nie zbudować się na nowych jądrach 6.x."
+                    )
+            except ValueError:
+                pass
+        elif method == "repo" and self.combo_repo.isVisible():
+            data = self.combo_repo.currentData() or ""
+            if distro.ubuntu_based:
+                opts.repo_package = data
+                if data:
+                    opis += f" ({data})"
+            else:
+                # Czysty Debian — lista wybiera źródło pakietów
+                opts.repo_source = data or "debian"
+                if opts.repo_source == "nvidia":
+                    opis += " — " + tr("oficjalne repozytorium NVIDIA")
+                else:
+                    opis += " — " + tr("repozytorium Debiana")
+                    gpus = self._state.get("gpus", [])
+                    if any(is_blackwell_or_newer(g.name) for g in gpus):
+                        opis += "\n\n⚠ " + tr(
+                            "Sterownik z repozytorium Debiana (seria 550) nie"
+                            " obsługuje kart RTX 50xx — wybierz Repozytorium"
+                            " NVIDIA."
+                        )
+
+        # Jedno proste pytanie — dalej wszystko dzieje się automatycznie
+        pytanie = (
+            tr("Wybrana metoda:") + f"\n{opis}\n\n"
+            + tr("Instalacja jest w pełni automatyczna. System poprosi raz"
+                 " o hasło administratora, a po zakończeniu zalecany jest"
+                 " restart komputera.")
+            + "\n\n" + tr("Rozpocząć instalację?")
+        )
+        odp = QMessageBox.question(
+            self, tr("Potwierdzenie instalacji"), pytanie,
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes,
+        )
+        if odp != QMessageBox.Yes:
+            return
+
+        # Bez pkexec (np. Debian bez pakietu pkexec) hasło zbiera GUI,
+        # a instalacja przechodzi awaryjnie przez sudo -S
+        sudo_pw = ""
+        if is_linux() and not which("pkexec"):
+            if not which("sudo"):
+                QMessageBox.critical(
+                    self, tr("Brak uprawnień"),
+                    tr("W systemie nie ma ani pkexec, ani sudo. Zainstaluj"
+                       " pakiet pkexec (polkit) i spróbuj ponownie."),
+                )
+                return
+            sudo_pw = self._ask_sudo_password()
+            if not sudo_pw:
+                return
+
+        # Blokada UI na czas instalacji
+        self.btn_install.setEnabled(False)
+        self.log.clear()
+        self.progress.setValue(0)
+        self.lbl_step.setText(tr("Przygotowywanie instalacji..."))
+
+        self._install_thread = InstallThread(opts, sudo_pw, self)
+        self._install_thread.sig_log.connect(self._on_log)
+        self._install_thread.sig_step.connect(self._on_step)
+        self._install_thread.sig_download.connect(self._on_download)
+        self._install_thread.sig_finished.connect(self._on_finished)
+        self._install_thread.start()
+
+    def _ask_sudo_password(self) -> str:
+        """Pyta o hasło administratora i sprawdza je przez sudo.
+
+        Zwraca zweryfikowane hasło albo pusty tekst po anulowaniu.
+        """
+        while True:
+            pw, ok = QInputDialog.getText(
+                self, tr("Hasło administratora"),
+                tr("W systemie nie ma pkexec — podaj hasło administratora"
+                   " (sudo), aby przeprowadzić instalację:"),
+                QLineEdit.Password,
+            )
+            if not ok:
+                return ""
+            # -k wymusza świeżą autoryzację, -p "" wyłącza tekstowy monit
+            wynik = subprocess.run(
+                ["sudo", "-S", "-k", "-p", "", "true"],
+                input=pw + "\n", text=True, capture_output=True,
+            )
+            if pw and wynik.returncode == 0:
+                return pw
+            QMessageBox.warning(
+                self, tr("Błędne hasło"),
+                tr("Hasło nie zostało przyjęte przez sudo — spróbuj ponownie."),
+            )
+
+    def _on_log(self, line: str) -> None:
+        self.log.append(line)
+        # Automatyczne przewijanie do najnowszej linii
+        sb = self.log.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
+    def _on_step(self, idx: int, total: int, label: str) -> None:
+        self.lbl_step.setText(f"{tr('Krok')} {idx}/{total}: {_tr_step(label)}")
+        self.progress.setValue(int(idx * 100 / max(total, 1)))
+
+    def _on_download(self, percent: int) -> None:
+        self.lbl_step.setText(tr("Pobieranie sterownika...") + f" {percent}%")
+        # Pobieranie wizualizowane w pierwszej połowie paska przed skryptem
+        self.progress.setValue(percent // 2)
+
+    def _on_finished(self, ok: bool, message: str) -> None:
+        self.btn_install.setEnabled(True)
+        self.sig_system_changed.emit()
+        if ok:
+            self.progress.setValue(100)
+            self.lbl_step.setText(tr("Instalacja zakończona pomyślnie."))
+            odp = QMessageBox.question(
+                self, tr("Sukces"),
+                tr("Sterownik został zainstalowany. Aby zmiany zadziałały,"
+                   " uruchom komputer ponownie.")
+                + "\n\n" + tr("Uruchomić ponownie teraz?"),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            )
+            if odp == QMessageBox.Yes:
+                subprocess.Popen(["systemctl", "reboot"])
+        else:
+            self.lbl_step.setText(tr("Instalacja nie powiodła się."))
+            QMessageBox.critical(
+                self, tr("Błąd instalacji"),
+                (message or tr("Nieznany błąd."))
+                + "\n\n" + tr("Pełny log znajdziesz w zakładce Historia."),
+            )

@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+# ============================================================================
+# NVIDIA Driver Installer — skrypt startowy
+# Tworzy środowisko wirtualne Pythona (.venv), instaluje zależności
+# (PySide6, requests) i uruchamia program. Wystarczy: ./NVIDIA-Installer.run
+#
+# Na Debianie/Ubuntu/Mint moduły venv i ensurepip są w osobnych pakietach
+# (python3-venv) — skrypt wykrywa ich brak i sam je doinstalowuje.
+# Przy pierwszym uruchomieniu pokazuje okno z informacją o przygotowywaniu
+# środowiska (kdialog lub zenity, zależnie od tego co jest w systemie).
+# ============================================================================
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="$SCRIPT_DIR/.venv"
+REQ_FILE="$SCRIPT_DIR/requirements.txt"
+STAMP_FILE="$VENV_DIR/.requirements.sha256"
+APP_TITLE="NVIDIA Driver Installer"
+
+msg() { echo -e "\033[1;32m[NVIDIA-Installer]\033[0m $*"; }
+err() { echo -e "\033[1;31m[BŁĄD]\033[0m $*" >&2; }
+
+# ---------------------------------------------------------------- okno postępu
+# Pierwsze uruchomienie może trwać kilka minut (pobieranie PySide6), więc gdy
+# jest środowisko graficzne, pokazujemy okno z informacją co się dzieje.
+PROGRESS_KIND="" PROGRESS_DBUS="" PROGRESS_PID="" PROGRESS_FIFO=""
+QDBUS_BIN="$(command -v qdbus6 || command -v qdbus-qt6 || command -v qdbus-qt5 \
+             || command -v qdbus || true)"
+
+gui_available() { [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; }
+
+progress_start() {
+    gui_available || return 0
+    if command -v kdialog >/dev/null 2>&1 && [ -n "$QDBUS_BIN" ]; then
+        # kdialog zwraca referencję D-Bus (usługa + ścieżka), przez którą
+        # aktualizujemy tekst i zamykamy okno; maksimum 0 = pasek nieokreślony
+        PROGRESS_DBUS="$(kdialog --title "$APP_TITLE" --progressbar "$1" 0 2>/dev/null || true)"
+        [ -n "$PROGRESS_DBUS" ] && PROGRESS_KIND="kdialog"
+    elif command -v zenity >/dev/null 2>&1; then
+        PROGRESS_FIFO="$(mktemp -u "${TMPDIR:-/tmp}/nvidia-installer-progress.XXXXXX")"
+        mkfifo "$PROGRESS_FIFO"
+        zenity --progress --pulsate --no-cancel --title="$APP_TITLE" \
+               --text="$1" --width=420 < "$PROGRESS_FIFO" 2>/dev/null &
+        PROGRESS_PID=$!
+        exec 9>"$PROGRESS_FIFO"
+        PROGRESS_KIND="zenity"
+    fi
+}
+
+progress_text() {
+    case "$PROGRESS_KIND" in
+        kdialog) $QDBUS_BIN $PROGRESS_DBUS setLabelText "$1" >/dev/null 2>&1 || true ;;
+        zenity)  echo "# $1" >&9 2>/dev/null || true ;;
+    esac
+}
+
+progress_end() {
+    case "$PROGRESS_KIND" in
+        kdialog) $QDBUS_BIN $PROGRESS_DBUS close >/dev/null 2>&1 || true ;;
+        zenity)  exec 9>&- 2>/dev/null || true
+                 kill "$PROGRESS_PID" 2>/dev/null || true
+                 rm -f "$PROGRESS_FIFO" ;;
+    esac
+    PROGRESS_KIND=""
+}
+
+# Okno błędu, gdy program uruchomiono bez terminala (np. z menedżera plików)
+show_error() {
+    err "$*"
+    gui_available || return 0
+    if command -v kdialog >/dev/null 2>&1; then
+        kdialog --title "$APP_TITLE" --error "$*" 2>/dev/null || true
+    elif command -v zenity >/dev/null 2>&1; then
+        zenity --error --title="$APP_TITLE" --text="$*" --width=420 2>/dev/null || true
+    fi
+}
+
+cleanup() { progress_end; }
+trap cleanup EXIT
+
+# ---------------------------------------------------------------- python3
+if ! command -v python3 >/dev/null 2>&1; then
+    show_error "Nie znaleziono python3. Zainstaluj go poleceniem:
+  Arch / CachyOS / EndeavourOS:  sudo pacman -S python
+  Fedora / Nobara:               sudo dnf install python3
+  Debian / Kubuntu / Mint:       sudo apt install python3 python3-venv"
+    exit 1
+fi
+
+# --------------------------------------------- uruchomienie polecenia jako root
+# W terminalu pyta o hasło przez sudo; bez terminala próbuje pkexec,
+# a na KDE bez pkexec — okna hasła kdialog podłączonego do sudo -S.
+run_as_root() {
+    if [ -t 0 ] && command -v sudo >/dev/null 2>&1; then
+        sudo "$@"
+    elif command -v pkexec >/dev/null 2>&1; then
+        pkexec "$@"
+    elif gui_available && command -v kdialog >/dev/null 2>&1 \
+         && command -v sudo >/dev/null 2>&1; then
+        kdialog --title "$APP_TITLE" \
+                --password "Podaj hasło administratora, aby doinstalować pakiety Pythona:" \
+            | sudo -S "$@"
+    else
+        return 1
+    fi
+}
+
+# ------------------------------------------------- moduły venv + ensurepip
+# Na Debianie/Ubuntu/Mint ensurepip jest w pakiecie python3-venv. Bez niego
+# venv powstaje BEZ pip i instalacja zależności kończy się błędem
+# „No module named pip" — dlatego sprawdzamy i doinstalowujemy z góry.
+if ! python3 -c "import venv, ensurepip" >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null 2>&1; then
+        msg "Brak modułu venv/ensurepip — doinstalowuję pakiet python3-venv (wymaga hasła administratora)..."
+        if ! run_as_root apt-get install -y python3-venv python3-pip; then
+            show_error "Nie udało się zainstalować pakietów. Uruchom ręcznie:
+  sudo apt install python3-venv python3-pip
+i włącz program ponownie."
+            exit 1
+        fi
+    else
+        show_error "Brak modułu venv/ensurepip dla Pythona. Zainstaluj go poleceniem:
+  Fedora / Nobara:               sudo dnf install python3
+  Arch / CachyOS / EndeavourOS:  (venv jest częścią pakietu python)"
+        exit 1
+    fi
+    # Kontrola po instalacji — dalsze kroki wymagają działającego ensurepip
+    if ! python3 -c "import venv, ensurepip" >/dev/null 2>&1; then
+        show_error "Moduł venv/ensurepip nadal niedostępny mimo instalacji pakietów."
+        exit 1
+    fi
+fi
+
+# ------------------------------------------- naprawa uszkodzonego środowiska
+# Przerwane pierwsze uruchomienie potrafi zostawić .venv bez pip —
+# wykrywamy to i budujemy środowisko od nowa.
+if [ -x "$VENV_DIR/bin/python" ] \
+   && ! "$VENV_DIR/bin/python" -m pip --version >/dev/null 2>&1; then
+    msg "Wykryto uszkodzone środowisko wirtualne (brak pip) — tworzę od nowa..."
+    rm -rf "$VENV_DIR"
+fi
+
+# ---------------------------------------------------------------- tworzenie venv
+FIRST_RUN=0
+if [ ! -x "$VENV_DIR/bin/python" ]; then
+    FIRST_RUN=1
+    msg "Pierwsze uruchomienie — tworzenie środowiska wirtualnego w $VENV_DIR ..."
+    progress_start "Pierwsze uruchomienie: przygotowywanie środowiska wirtualnego Pythona..."
+    # Nieudane tworzenie nie może zostawić częściowego .venv
+    if ! python3 -m venv "$VENV_DIR"; then
+        rm -rf "$VENV_DIR"
+        show_error "Nie udało się utworzyć środowiska wirtualnego Pythona."
+        exit 1
+    fi
+fi
+
+# ------------------------------------------- zależności (tylko gdy się zmieniły)
+NEW_SUM="$(sha256sum "$REQ_FILE" | cut -d' ' -f1)"
+OLD_SUM="$(cat "$STAMP_FILE" 2>/dev/null || true)"
+if [ "$NEW_SUM" != "$OLD_SUM" ]; then
+    msg "Instalowanie zależności (PySide6, requests) — może potrwać chwilę..."
+    [ "$FIRST_RUN" = 1 ] || progress_start "Aktualizowanie zależności programu..."
+    progress_text "Instalowanie zależności (PySide6, requests) — to może potrwać kilka minut..."
+    if ! { "$VENV_DIR/bin/python" -m pip install --upgrade pip --quiet \
+           && "$VENV_DIR/bin/python" -m pip install -r "$REQ_FILE"; }; then
+        show_error "Instalacja zależności (PySide6, requests) nie powiodła się.
+Sprawdź połączenie z internetem i uruchom program ponownie."
+        exit 1
+    fi
+    echo "$NEW_SUM" > "$STAMP_FILE"
+else
+    msg "Zależności aktualne."
+fi
+progress_end
+
+# ---------------------------------------------------------------- start programu
+msg "Uruchamianie NVIDIA Driver Installer..."
+exec "$VENV_DIR/bin/python" "$SCRIPT_DIR/main.py" "$@"

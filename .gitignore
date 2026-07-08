@@ -1,0 +1,6 @@
+# Środowisko wirtualne tworzone przez NVIDIA-Installer.run
+.venv/
+
+# Pliki tymczasowe Pythona
+__pycache__/
+*.pyc

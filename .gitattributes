@@ -1,0 +1,6 @@
+# Skrypty uruchamiane na Linuksie muszą mieć końce linii LF,
+# nawet gdy repozytorium jest klonowane na Windows
+*.run text eol=lf
+*.sh  text eol=lf
+*.py  text eol=lf
+* text=auto
