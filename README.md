@@ -6,6 +6,11 @@ A simple graphical tool (PySide6) for **fully automatic installation of NVIDIA
 drivers on Linux**. Pick a method, click a single button, enter the administrator
 password once — the program takes care of the rest.
 
+> ⚠️ **Before you start:** installing graphics drivers can, in rare cases, break
+> your boot (black screen). Take a **Timeshift** snapshot (or back up important
+> data) beforehand. This is a hobby project provided "as is", without warranty —
+> use at your own risk.
+
 ---
 
 ## Screenshots

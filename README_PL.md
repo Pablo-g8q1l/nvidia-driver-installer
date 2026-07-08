@@ -6,6 +6,11 @@ Prosty w obsłudze program graficzny (PySide6) do **w pełni automatycznej
 instalacji sterowników NVIDIA na Linuksie**. Wybierasz metodę, klikasz jeden
 przycisk, podajesz raz hasło administratora — resztą zajmuje się program.
 
+> ⚠️ **Zanim zaczniesz:** instalacja sterowników graficznych może w rzadkich
+> przypadkach zepsuć rozruch (czarny ekran). Zrób wcześniej migawkę **Timeshift**
+> (lub kopię ważnych danych). To projekt hobbystyczny, udostępniany „tak jak
+> jest", bez gwarancji — używasz na własną odpowiedzialność.
+
 ---
 
 ## Zrzuty ekranu
