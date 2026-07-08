@@ -78,6 +78,23 @@ offers to install it for you.
 
 ---
 
+## Ready-made binary (no Python required)
+
+If you prefer not to run from source, download the ready binary
+`nvidia-driver-installer-linux-x86_64` from the
+[Releases](https://github.com/Pablo-g8q1l/nvidia-driver-installer/releases) page,
+make it executable and run it:
+
+```bash
+chmod +x nvidia-driver-installer-linux-x86_64
+./nvidia-driver-installer-linux-x86_64
+```
+
+The binary is built on Ubuntu 24.04 (glibc 2.39), so it runs on distributions
+with glibc 2.39 or newer. No Python or PySide6 installation is required.
+
+---
+
 ## How installation works
 
 1. The program detects your distribution, graphics card and current driver.

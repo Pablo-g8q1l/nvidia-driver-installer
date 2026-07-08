@@ -78,6 +78,23 @@ Na Debianie / Kubuntu / Mint moduły `venv` i `ensurepip` są w osobnym pakiecie
 
 ---
 
+## Gotowa binarka (bez Pythona)
+
+Jeśli wolisz nie uruchamiać ze źródeł, pobierz gotową binarkę
+`nvidia-driver-installer-linux-x86_64` z zakładki
+[Releases](https://github.com/Pablo-g8q1l/nvidia-driver-installer/releases),
+nadaj jej prawo wykonywania i uruchom:
+
+```bash
+chmod +x nvidia-driver-installer-linux-x86_64
+./nvidia-driver-installer-linux-x86_64
+```
+
+Binarka jest zbudowana na Ubuntu 24.04 (glibc 2.39), więc działa na
+dystrybucjach z glibc 2.39 lub nowszym. Nie trzeba instalować Pythona ani PySide6.
+
+---
+
 ## Jak działa instalacja
 
 1. Program wykrywa dystrybucję, kartę graficzną i obecny sterownik.
