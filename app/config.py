@@ -34,8 +34,11 @@ def _system_language() -> str:
 
 # Default values — language detected from the system (Polish locale → Polish,
 # other → English), dark theme, boot report disabled (opt-in: the diagnostic
-# service stays on the system, so it requires consent in Settings)
-DEFAULTS = {"language": _system_language(), "theme": "dark", "boot_report": False}
+# service stays on the system, so it requires consent in Settings), Timeshift
+# snapshot before installation disabled by default (the checkbox only appears
+# when Timeshift is installed; the user opts in per installation)
+DEFAULTS = {"language": _system_language(), "theme": "dark", "boot_report": False,
+            "snapshot": False}
 
 
 def load_config() -> dict:

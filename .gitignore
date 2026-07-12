@@ -4,3 +4,6 @@
 # Pliki tymczasowe Pythona
 __pycache__/
 *.pyc
+
+# Lokalne wyniki testów (cykl testowy prowadzony w repo dev)
+testy/

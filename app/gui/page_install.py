@@ -7,18 +7,19 @@ import subprocess
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QButtonGroup, QCheckBox, QComboBox, QFrame, QGroupBox, QHBoxLayout,
-    QInputDialog, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton,
-    QRadioButton, QTextEdit, QVBoxLayout, QWidget,
+    QButtonGroup, QCheckBox, QComboBox, QFrame, QGridLayout, QGroupBox,
+    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox, QProgressBar,
+    QPushButton, QRadioButton, QTextEdit, QVBoxLayout, QWidget,
 )
 
+from app import config
 from app.core import nvidia_versions
 from app.core.gpu import (
     driver_description, is_blackwell_or_newer, is_turing_or_newer,
     recommended_driver_info,
 )
 from app.core.installer import InstallOptions, InstallThread
-from app.core.utils import is_linux, which
+from app.core.utils import is_linux, system_env, which
 from app.i18n import tr, tr_prefix
 
 
@@ -65,17 +66,45 @@ class InstallPage(QWidget):
         layout.setSpacing(10)
 
         # --- Detected system ------------------------------------------------
+        # Two columns: a dimmed caption and the actual value, so the eye lands
+        # on the values instead of a flat wall of same-colored text.
         box_sys = QGroupBox(tr("Wykryty system"))
         sys_lay = QVBoxLayout(box_sys)
-        self.lbl_distro = QLabel(tr("Dystrybucja: wykrywanie..."))
-        self.lbl_gpu = QLabel(tr("Karta graficzna: wykrywanie..."))
-        self.lbl_driver = QLabel(tr("Obecny sterownik: wykrywanie..."))
+        self.lbl_distro = QLabel(tr("wykrywanie..."))
+        self.lbl_gpu = QLabel(tr("wykrywanie..."))
+        self.lbl_driver = QLabel(tr("wykrywanie..."))
+        # The current driver is the reference for the update notice below, so
+        # its value is the only one shown in bold.
+        f = self.lbl_driver.font()
+        f.setBold(True)
+        self.lbl_driver.setFont(f)
         # The kernel is known immediately (os.uname), without background detection
         kernel = os.uname().release if is_linux() else "—"
-        self.lbl_kernel = QLabel(f"{tr('Uruchomione jądro')}: {kernel}")
-        for lbl in (self.lbl_distro, self.lbl_gpu, self.lbl_driver,
-                    self.lbl_kernel):
-            sys_lay.addWidget(lbl)
+        self.lbl_kernel = QLabel(kernel)
+        info_grid = QGridLayout()
+        info_grid.setHorizontalSpacing(16)
+        info_grid.setVerticalSpacing(6)
+        info_grid.setColumnStretch(1, 1)
+        rows = (
+            (tr("Dystrybucja"), self.lbl_distro),
+            (tr("Karta graficzna"), self.lbl_gpu),
+            (tr("Obecny sterownik"), self.lbl_driver),
+            (tr("Uruchomione jądro"), self.lbl_kernel),
+        )
+        for row, (caption, value) in enumerate(rows):
+            lbl_caption = QLabel(caption)
+            lbl_caption.setObjectName("dim")
+            info_grid.addWidget(lbl_caption, row, 0, Qt.AlignmentFlag.AlignTop)
+            value.setWordWrap(True)
+            info_grid.addWidget(value, row, 1)
+        sys_lay.addLayout(info_grid)
+        # Driver update notice — accent callout (QSS #updateNotice), filled in
+        # _update_notice, hidden until a newer version for the card is available
+        self.lbl_update = QLabel("")
+        self.lbl_update.setObjectName("updateNotice")
+        self.lbl_update.setWordWrap(True)
+        self.lbl_update.setVisible(False)
+        sys_lay.addWidget(self.lbl_update)
         layout.addWidget(box_sys)
 
         # --- Installation method --------------------------------------------
@@ -155,6 +184,18 @@ class InstallPage(QWidget):
         m_lay.addWidget(self.chk_open)
         layout.addWidget(box_method)
 
+        # --- Timeshift snapshot (checkbox only when the tool is installed) ---
+        self.chk_snapshot = QCheckBox(
+            tr("Utwórz migawkę systemu Timeshift przed instalacją")
+        )
+        has_timeshift = bool(is_linux() and which("timeshift"))
+        self.chk_snapshot.setVisible(has_timeshift)
+        self.chk_snapshot.setChecked(
+            has_timeshift and bool(self._cfg.get("snapshot", False))
+        )
+        self.chk_snapshot.toggled.connect(self._on_snapshot_toggled)
+        layout.addWidget(self.chk_snapshot)
+
         # --- Install button --------------------------------------------------
         self.btn_install = QPushButton(tr("ZAINSTALUJ STEROWNIK"))
         self.btn_install.setObjectName("primary")
@@ -188,21 +229,15 @@ class InstallPage(QWidget):
         driver = state.get("driver", {})
 
         if distro:
-            txt = f"{tr('Dystrybucja')}: {distro.name}"
+            txt = distro.name
             if not distro.supported:
                 txt += "  ⚠ " + tr("(nieobsługiwana — instalacja zablokowana)")
             self.lbl_distro.setText(txt)
         if gpus:
-            self.lbl_gpu.setText(
-                f"{tr('Karta graficzna')}: " + ", ".join(g.name for g in gpus)
-            )
+            self.lbl_gpu.setText(", ".join(g.name for g in gpus))
         else:
-            self.lbl_gpu.setText(
-                f"{tr('Karta graficzna')}: " + tr("nie wykryto karty NVIDIA")
-            )
-        self.lbl_driver.setText(
-            f"{tr('Obecny sterownik')}: {driver_description(driver)}"
-        )
+            self.lbl_gpu.setText(tr("nie wykryto karty NVIDIA"))
+        self.lbl_driver.setText(driver_description(driver))
 
         # Installation is possible only on a supported Linux with an NVIDIA card
         can_install = bool(distro and distro.supported and is_linux())
@@ -319,6 +354,9 @@ class InstallPage(QWidget):
                 tr("Architektura karty:") + f" {tr(rec['arch'])}"
             )
 
+        # Driver update notice — reuses the data fetched above, no extra traffic
+        self._update_notice(run_versions, rec)
+
         # Repository
         distro = self._state.get("distro")
         if repo_versions:
@@ -381,6 +419,43 @@ class InstallPage(QWidget):
                      " obsługiwać. Najbezpieczniejsza jest metoda .run"
                      " z zalecaną wersją.")
             )
+
+    def _update_notice(self, run_versions: dict, rec: dict) -> None:
+        """Shows a notice when a newer driver suitable for the card is available.
+
+        Applies only to the installed proprietary / open-kernel driver — with
+        nouveau/NVK updates arrive with the system (Mesa/kernel), and without
+        internet the fetched versions are fallbacks, not facts. The comparison
+        target respects the card's architecture: Legacy cards are compared with
+        their Legacy branch, and cards with a series cap (e.g. Maxwell/Pascal
+        ≤ 580) are not urged onto a branch that dropped their support.
+        """
+        driver = self._state.get("driver", {})
+        installed = driver.get("wersja", "")
+        self.lbl_update.setVisible(False)
+        if (driver.get("typ") not in ("proprietary", "open-kernel")
+                or not installed or not run_versions.get("online")):
+            return
+
+        target = run_versions.get("production") or ""
+        if rec["legacy"]:
+            target = next(
+                (v for v in run_versions.get("legacy", [])
+                 if v.split(".")[0] == rec["legacy"]), "",
+            )
+        elif rec["max_major"]:
+            try:
+                if target and int(target.split(".")[0]) > rec["max_major"]:
+                    target = ""
+            except ValueError:
+                target = ""
+
+        if target and nvidia_versions.is_newer(target, installed):
+            self.lbl_update.setText(
+                f"⬆ <b>{tr('Dostępna nowsza wersja sterownika:')} {target}</b>"
+                f" ({tr('zainstalowana:')} {installed})"
+            )
+            self.lbl_update.setVisible(True)
 
     # ------------------------------------------------------ option logic
     def _update_method_widgets(self) -> None:
@@ -473,6 +548,11 @@ class InstallPage(QWidget):
             and any(is_blackwell_or_newer(g.name) for g in gpus)
         )
 
+    def _on_snapshot_toggled(self, checked: bool) -> None:
+        """Persists the snapshot choice so it survives program restarts."""
+        self._cfg["snapshot"] = bool(checked)
+        config.save_config(self._cfg)
+
     def _selected_method(self) -> str:
         if self.rb_nvk.isChecked():
             return "nvk"
@@ -490,7 +570,9 @@ class InstallPage(QWidget):
 
         opts = InstallOptions(method=method, distro=distro,
                               open_modules=self.chk_open.isChecked(),
-                              boot_report=bool(self._cfg.get("boot_report", False)))
+                              boot_report=bool(self._cfg.get("boot_report", False)),
+                              snapshot=(self.chk_snapshot.isVisible()
+                                        and self.chk_snapshot.isChecked()))
         opis = {
             "nvk": tr("NVK — sterownik open source (Mesa)"),
             "repo": tr("Repozytorium dystrybucji (zalecane)"),
@@ -544,6 +626,8 @@ class InstallPage(QWidget):
         # One simple question — everything after that happens automatically
         pytanie = (
             tr("Wybrana metoda:") + f"\n{opis}\n\n"
+            + (tr("Przed instalacją zostanie utworzona migawka systemu"
+                  " (Timeshift).") + "\n\n" if opts.snapshot else "")
             + tr("Instalacja jest w pełni automatyczna. System poprosi raz"
                  " o hasło administratora, a po zakończeniu zalecany jest"
                  " restart komputera.")
@@ -639,7 +723,9 @@ class InstallPage(QWidget):
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
             )
             if odp == QMessageBox.Yes:
-                subprocess.Popen(["systemctl", "reboot"])
+                # system_env(): from the release binary systemctl must load the
+                # SYSTEM libraries, not the ones bundled by PyInstaller
+                subprocess.Popen(["systemctl", "reboot"], env=system_env())
         else:
             self.lbl_step.setText(tr("Instalacja nie powiodła się."))
             QMessageBox.critical(

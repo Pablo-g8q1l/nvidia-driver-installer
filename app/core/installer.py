@@ -46,6 +46,7 @@ class InstallOptions:
     repo_source: str = ""       # plain Debian: "debian" (non-free) | "nvidia"
     use_backports: bool = False  # NVK on plain Debian with RTX 50xx
     boot_report: bool = False   # boot report service (opt-in from Settings)
+    snapshot: bool = False      # Timeshift snapshot first (opt-in, install page)
 
 
 # Runs a script supplied on standard input (the pkexec path).
@@ -267,6 +268,22 @@ _ARCH_KERNEL_HEADERS = (
     ' 2>/dev/null || echo linux)"'
 )
 
+
+# System snapshot BEFORE any modification (opt-in: a checkbox on the install
+# page, shown only when Timeshift is installed). Runs as the FIRST step of the
+# plan, so a restore returns the system to the exact pre-installation state.
+# Failure ABORTS the installation — the user explicitly requested the safety
+# net, and continuing without it would silently defeat its purpose. The command
+# still checks the actual state (timeshift binary present): the GUI hides the
+# option without Timeshift, so the error branch only fires when the tool
+# disappeared between the click and the script run.
+_SNAPSHOT_STEP = (
+    "Tworzenie migawki systemu (Timeshift — może potrwać kilka minut)",
+    """command -v timeshift >/dev/null 2>&1 \\
+  || error "Program Timeshift nie jest zainstalowany — zainstaluj go albo wyłącz opcję migawki"
+timeshift --create --comments "NVIDIA Driver Installer" --scripted \\
+  || error "Tworzenie migawki Timeshift nie powiodło się — szczegóły w logu powyżej\"""",
+)
 
 # Boot report: a systemd service that, after every system startup, writes
 # graphics diagnostics (driver, modules, EGL consistency, journal errors) to
@@ -707,6 +724,11 @@ def build_plan(
     # comment near _BOOT_REPORT_STEP. Opt-in: when the option is disabled the
     # installation cleans up the service from earlier installations.
     steps.append(_BOOT_REPORT_STEP if opts.boot_report else _BOOT_REPORT_REMOVE_STEP)
+
+    # Optional Timeshift snapshot as the very first step — see _SNAPSHOT_STEP.
+    # Off by default (opts.snapshot=False), so existing plans stay unchanged.
+    if opts.snapshot:
+        steps.insert(0, _SNAPSHOT_STEP)
 
     lines = [_SCRIPT_HEADER]
     for label, cmds in steps:

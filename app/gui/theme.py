@@ -151,6 +151,15 @@ QFrame#methodRow[selected="true"] {{
     border-left: 4px solid {ACCENT};
 }}
 
+/* Driver update notice — accent callout in the detected-system box */
+QLabel#updateNotice {{
+    background-color: rgba(118, 185, 0, 40);
+    border: 1px solid {ACCENT};
+    border-left: 4px solid {ACCENT};
+    border-radius: 8px;
+    padding: 8px 12px;
+}}
+
 /* ---------- Progress bar ---------- */
 QProgressBar {{
     background-color: {c['bg_input']};

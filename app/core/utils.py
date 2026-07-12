@@ -7,6 +7,7 @@ exception, so the program also works where the commands do not exist
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -35,6 +36,28 @@ def which(cmd: str) -> str | None:
     return shutil.which(cmd)
 
 
+def system_env() -> dict[str, str]:
+    """Environment for launching system tools from the program.
+
+    The release binary (PyInstaller via pyforge) points LD_LIBRARY_PATH at its
+    bundled libraries so the APP loads them — but child system tools must load
+    the SYSTEM libraries, or they fail to start (the 2026-07-10 case: "restart
+    now" after installation from the binary silently did nothing, because
+    systemctl crashed on the bundled libs; setuid pkexec/sudo ignore the
+    variable, which is why the installation itself worked). PyInstaller keeps
+    the original value in LD_LIBRARY_PATH_ORIG — restore it; in a frozen build
+    without the original the variable is dropped. Running from source returns
+    the environment unchanged.
+    """
+    env = dict(os.environ)
+    orig = env.get("LD_LIBRARY_PATH_ORIG")
+    if orig is not None:
+        env["LD_LIBRARY_PATH"] = orig
+    elif getattr(sys, "frozen", False):
+        env.pop("LD_LIBRARY_PATH", None)
+    return env
+
+
 def run(cmd: list[str], timeout: int = 30) -> tuple[int, str, str]:
     """Runs a command and returns (code, stdout, stderr).
 
@@ -42,7 +65,8 @@ def run(cmd: list[str], timeout: int = 30) -> tuple[int, str, str]:
     code, so the caller can always safely check the result.
     """
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                           env=system_env())
         return p.returncode, p.stdout.strip(), p.stderr.strip()
     except FileNotFoundError:
         return 127, "", f"Nie znaleziono polecenia: {cmd[0]}"

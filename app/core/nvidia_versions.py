@@ -142,6 +142,19 @@ def open_module_flag(version: str) -> str:
     return ""
 
 
+def is_newer(available: str, installed: str) -> bool:
+    """Whether the available version is strictly newer than the installed one.
+
+    Compares numeric segments ("580.105.08" > "580.95.05"). Unparseable input
+    returns False — a missing notice is better than a false one.
+    """
+    def _parts(ver: str) -> tuple[int, ...]:
+        return tuple(int(x) for x in re.findall(r"\d+", ver))
+
+    a, i = _parts(available), _parts(installed)
+    return bool(a and i) and a > i
+
+
 def _czysta_wersja(wersja: str) -> str:
     """Just the version number, without epoch and package revision (1:26.1.4-1 → 26.1.4)."""
     return re.sub(r"^\d+:", "", wersja).split("-")[0]

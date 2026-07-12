@@ -12,7 +12,7 @@ from app import config
 from app.gui.theme import apply_theme
 from app.i18n import tr
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.2"
 
 
 class SettingsPage(QWidget):

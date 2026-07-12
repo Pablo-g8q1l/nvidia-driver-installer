@@ -79,6 +79,12 @@ _EN = {
         " RTX 20xx cards and newer.",
     "Otwarte moduły jądra (open kernel modules) — RTX 20xx i nowsze":
         "Open kernel modules — RTX 20xx and newer",
+    "Utwórz migawkę systemu Timeshift przed instalacją":
+        "Create a Timeshift system snapshot before installation",
+    "Przed instalacją zostanie utworzona migawka systemu (Timeshift).":
+        "A system snapshot (Timeshift) will be created before the installation.",
+    "Dostępna nowsza wersja sterownika:": "A newer driver version is available:",
+    "zainstalowana:": "installed:",
     "ZAINSTALUJ STEROWNIK": "INSTALL DRIVER",
     "Tutaj pojawi się szczegółowy przebieg instalacji...":
         "Detailed installation progress will appear here...",
@@ -241,6 +247,8 @@ _EN = {
     "Odświeżanie listy pakietów": "Refreshing the package list",
     "Porządkowanie usługi raportu rozruchu (opcja wyłączona)":
         "Cleaning up the boot report service (option disabled)",
+    "Tworzenie migawki systemu (Timeshift — może potrwać kilka minut)":
+        "Creating a system snapshot (Timeshift — may take a few minutes)",
     "Usuwanie blokady nouveau i konfiguracji NVIDIA":
         "Removing the nouveau blacklist and NVIDIA configuration",
     "Usuwanie konfliktującej odmiany sterownika":
@@ -527,4 +535,8 @@ _EN = {
     "Instalator NVIDIA zwrócił błąd — szczegóły w /var/log/nvidia-installer.log":
         "The NVIDIA installer returned an error — details in"
         " /var/log/nvidia-installer.log",
+    "Program Timeshift nie jest zainstalowany — zainstaluj go albo wyłącz opcję migawki":
+        "Timeshift is not installed — install it or disable the snapshot option",
+    "Tworzenie migawki Timeshift nie powiodło się — szczegóły w logu powyżej":
+        "Creating the Timeshift snapshot failed — details in the log above",
 }
