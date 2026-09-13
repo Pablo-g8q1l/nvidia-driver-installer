@@ -1,4 +1,34 @@
 #!/usr/bin/env bash
+
+# --- Odporne tworzenie srodowiska wirtualnego --------------------------------
+# Na czesci dystrybucji (np. Kubuntu 26.10) `python3 -m venv` przerywa prace,
+# bo w systemie brakuje modulu ensurepip — zostawia wtedy katalog bez
+# `bin/activate` i bez pipa. W takim wypadku tworzymy venv z --without-pip
+# i doinstalowujemy pipa bootstrapem z bootstrap.pypa.io.
+# Uzycie: make_venv <katalog_venv> [dodatkowe opcje python -m venv]
+make_venv() {
+    _mv_dir="$1"; shift
+    _mv_py="${MAKE_VENV_PY:-python3}"
+    rm -rf "$_mv_dir"
+    if ! "$_mv_py" -m venv "$@" "$_mv_dir" >/dev/null 2>&1 || [ ! -f "$_mv_dir/bin/activate" ]; then
+        rm -rf "$_mv_dir"
+        "$_mv_py" -m venv --without-pip "$@" "$_mv_dir" || return 1
+    fi
+    if ! "$_mv_dir/bin/python" -m pip --version >/dev/null 2>&1; then
+        _mv_gp="$_mv_dir/get-pip.py"
+        if command -v curl >/dev/null 2>&1; then
+            curl -fsSL https://bootstrap.pypa.io/get-pip.py -o "$_mv_gp" || return 1
+        elif command -v wget >/dev/null 2>&1; then
+            wget -qO "$_mv_gp" https://bootstrap.pypa.io/get-pip.py || return 1
+        else
+            echo "[BLAD] Do zainstalowania pipa potrzebny jest curl lub wget." >&2
+            return 1
+        fi
+        "$_mv_dir/bin/python" "$_mv_gp" >/dev/null 2>&1 || { rm -f "$_mv_gp"; return 1; }
+        rm -f "$_mv_gp"
+    fi
+    return 0
+}
 # ============================================================================
 # NVIDIA Driver Installer — skrypt startowy
 # Tworzy środowisko wirtualne Pythona (.venv), instaluje zależności
@@ -142,12 +172,12 @@ fi
 
 # ---------------------------------------------------------------- tworzenie venv
 FIRST_RUN=0
-if [ ! -x "$VENV_DIR/bin/python" ]; then
+if [ ! -x "$VENV_DIR/bin/python" ] || [ ! -f "$VENV_DIR/bin/activate" ]; then
     FIRST_RUN=1
     msg "Pierwsze uruchomienie — tworzenie środowiska wirtualnego w $VENV_DIR ..."
     progress_start "Pierwsze uruchomienie: przygotowywanie środowiska wirtualnego Pythona..."
     # Nieudane tworzenie nie może zostawić częściowego .venv
-    if ! python3 -m venv "$VENV_DIR"; then
+    if ! make_venv "$VENV_DIR"; then
         rm -rf "$VENV_DIR"
         show_error "Nie udało się utworzyć środowiska wirtualnego Pythona."
         exit 1
