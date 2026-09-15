@@ -135,6 +135,50 @@ def _check_version_match() -> CheckResult:
     )
 
 
+def _check_suse_mixed_install(distro: DistroInfo) -> CheckResult:
+    """openSUSE: a .run installation and driver packages living side by side.
+
+    The trap is specific to openSUSE: the driver packages carry modalias
+    supplements, so `zypper dup` installs them by itself once the NVIDIA
+    repository is enabled — even though a .run driver is already in place. The
+    kmp is then built only for the newly installed kernel, while every library
+    symlink keeps pointing at the .run version, so the module and userspace
+    come from two different releases. The desktop dies on EGL initialization
+    and the machine boots to a black screen (live Tumbleweed, 2026-09-14).
+
+    _check_version_match() does not catch it: with mismatched libraries
+    nvidia-smi usually fails to answer at all, and the check then has nothing
+    to compare. Here the two installation sources are checked directly.
+    """
+    name = tr("Źródła sterownika")
+    if distro.family != "suse":
+        return CheckResult(name, "info", tr("Kontrola dotyczy tylko openSUSE"))
+    has_run = os.path.exists("/usr/bin/nvidia-uninstall")
+    code, out, _ = run(["rpm", "-qa", "--qf", "%{NAME}\n"])
+    pkgs = [ln for ln in out.splitlines()
+            if re.match(r"^nvidia-(video|gl|compute|open-driver|driver)", ln)] \
+        if code == 0 else []
+    if not (has_run and pkgs):
+        return CheckResult(
+            name, "ok",
+            tr("Sterownik z jednego źródła") if (has_run or pkgs)
+            else tr("Brak sterownika NVIDIA z repozytorium i z pliku .run"),
+        )
+    # both present — check whether the packages are at least held back
+    locked, _o, _e = run(["zypper", "--non-interactive", "ll"])
+    protected = locked == 0 and "nvidia" in _o
+    return CheckResult(
+        name, "blad",
+        tr("Sterownik z pliku .run ORAZ pakiety z repozytorium ({n}) —"
+           " moduł jądra i biblioteki mogą pochodzić z różnych wersji."
+           " Zostaw jedno źródło: nvidia-uninstall (usuwa .run) albo"
+           " zypper rm pakietów.").format(n=len(pkgs))
+        + ("" if protected else " "
+           + tr("Pakiety nie są zablokowane — kolejna aktualizacja systemu"
+                " znów je zainstaluje.")),
+    )
+
+
 def _check_secure_boot() -> CheckResult:
     if which("mokutil"):
         code, out, _ = run(["mokutil", "--sb-state"])
@@ -195,7 +239,7 @@ def _check_gsp_firmware() -> CheckResult:
     fails and the card is left without a driver.
     """
     gpus = detect_gpus()
-    if not gpus or not any(is_turing_or_newer(g.name) for g in gpus):
+    if not gpus or not any(is_turing_or_newer(g.name, g.pci_id) for g in gpus):
         return CheckResult(
             "Firmware GSP", "info", tr("Karta nie wymaga firmware GSP — pominięto")
         )
@@ -412,6 +456,7 @@ def run_diagnostics() -> list[CheckResult]:
         _check_module_loaded(),
         _check_nvidia_smi(),
         _check_version_match(),
+        _check_suse_mixed_install(distro),
         _check_secure_boot(),
         _check_kernel_headers(),
         _check_nouveau_blacklist(),

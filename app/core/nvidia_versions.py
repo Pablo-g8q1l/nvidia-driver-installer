@@ -24,11 +24,14 @@ NVIDIA_REPO_BASE = "https://developer.download.nvidia.com/compute/cuda/repos"
 
 # Fallback versions used only when there is no internet at all.
 # Installation requires the network anyway, so they mainly serve to show the GUI.
+# 580.xx is a legacy branch since the 590/595 release (2026): the last one
+# supporting Maxwell/Pascal/Volta (official NVIDIA announcement, 2025-07) —
+# it still receives updates, unlike the frozen 470/390/340.
 FALLBACK_VERSIONS = {
-    "production": "580.95.05",
+    "production": "595.84",
     "new_feature": None,
     "beta": None,
-    "legacy": ["470.256.02", "390.157", "340.108"],
+    "legacy": ["580.173.02", "470.256.02", "390.157", "340.108"],
 }
 
 # Branch labels on the NVIDIA page → keys of the result dictionary
@@ -62,6 +65,25 @@ def download_url(version: str) -> str:
         "https://us.download.nvidia.com/XFree86/Linux-x86_64/"
         f"{version}/NVIDIA-Linux-x86_64-{version}.run"
     )
+
+
+def _archive_latest(major: int, timeout: int = 15) -> str:
+    """Newest version of a branch from the official NVIDIA archive index.
+
+    The unix drivers page stopped listing some legacy branches (2026-07 it
+    shows only 470.xx), but download.nvidia.com/XFree86/Linux-x86_64/ keeps
+    a directory per version — the newest one of the given series is the
+    current state of that branch (matters for 580, which still gets updates).
+    """
+    try:
+        html = _http_get("https://download.nvidia.com/XFree86/Linux-x86_64/",
+                         timeout)
+    except Exception:
+        return ""
+    vers = re.findall(rf"\b({major}\.\d{{1,3}}(?:\.\d{{1,3}})?)/", html)
+    if not vers:
+        return ""
+    return max(vers, key=lambda v: [int(x) for x in v.split(".")])
 
 
 def fetch_run_versions(timeout: int = 15) -> dict:
@@ -106,11 +128,29 @@ def fetch_run_versions(timeout: int = 15) -> dict:
         except Exception:
             pass
 
+    # The 580 branch (the last one for Maxwell/Pascal/Volta) is still updated
+    # but the unix page may not list it among the legacy entries — fetch the
+    # newest 580.xx from the official archive so owners of those cards get
+    # a current recommendation, not a frozen fallback.
+    if result["online"] and not any(
+            v.split(".")[0] == "580" for v in result["legacy"]):
+        ver = _archive_latest(580, timeout)
+        if ver:
+            result["legacy"].insert(0, ver)
+
+    # The page lists ever fewer legacy branches (2026-07: only 470.xx) —
+    # fill in the missing SERIES from the fallbacks, so Fermi/Tesla owners
+    # still see their branch; series found online are left untouched.
+    known = {v.split(".")[0] for v in result["legacy"]}
+    for fv in FALLBACK_VERSIONS["legacy"]:
+        if fv.split(".")[0] not in known:
+            result["legacy"].append(fv)
+    # newest series first — the display order in the GUI list
+    result["legacy"].sort(key=lambda v: int(v.split(".")[0]), reverse=True)
+
     # Final fallback — versions hardcoded in the program
     if not result["production"]:
         result["production"] = FALLBACK_VERSIONS["production"]
-    if not result["legacy"]:
-        result["legacy"] = list(FALLBACK_VERSIONS["legacy"])
     return result
 
 
@@ -123,6 +163,22 @@ def nvidia_repo_url(distro: DistroInfo) -> str:
 def keyring_url(distro: DistroInfo) -> str:
     """URL of the cuda-keyring package that adds the signed NVIDIA repository."""
     return nvidia_repo_url(distro) + "/cuda-keyring_1.1-1_all.deb"
+
+
+def suse_repo_url(distro: DistroInfo) -> str:
+    """URL of the official NVIDIA zypper repository for openSUSE.
+
+    Tumbleweed (and Slowroll) have a rolling repo without a version in the
+    path; Leap uses leap/$releasever — the literal variable is resolved by
+    zypper itself, so one URL works across Leap upgrades. Tumbleweed is
+    recognized by the id or by VERSION_ID being a snapshot date (no dot)
+    rather than a Leap release number like 15.6 / 16.0.
+    """
+    ident = (distro.id or "").lower()
+    if ("tumbleweed" in ident or "slowroll" in ident
+            or not re.match(r"\d+\.\d+", distro.version or "")):
+        return "https://download.nvidia.com/opensuse/tumbleweed"
+    return "https://download.nvidia.com/opensuse/leap/$releasever"
 
 
 def open_module_flag(version: str) -> str:
@@ -182,6 +238,10 @@ def get_mesa_version(distro: DistroInfo | None) -> str:
              if code == 0 else None)
         if m and not m.group(1).startswith("("):
             return _czysta_wersja(m.group(1))
+    if distro.family == "suse":
+        code, out, _ = run(["zypper", "-n", "info", "Mesa"], timeout=40)
+        m = re.search(r"^(?:Version|Wersja)\s*:\s*(\S+)", out, re.M) if code == 0 else None
+        return _czysta_wersja(m.group(1)) if m else ""
     return ""
 
 
@@ -203,6 +263,8 @@ def get_repo_versions(distro: DistroInfo) -> list[dict]:
         if distro.ubuntu_based:
             return _ubuntu_repo_versions()
         return _debian_repo_versions(distro)
+    if distro.family == "suse":
+        return _suse_repo_versions()
     return []
 
 
@@ -231,6 +293,42 @@ def _fedora_repo_versions() -> list[dict]:
             "zalecany": True,
         }
     ]
+
+
+def _suse_repo_versions() -> list[dict]:
+    """openSUSE: the newest driver generation visible to zypper.
+
+    The signed open kernel modules (nvidia-open-driver-G0X-signed-kmp-default)
+    live in the main openSUSE OSS repository, so a version is usually known
+    even before the NVIDIA repository (userspace packages) is added during
+    installation. An empty list when nothing is found — the GUI then shows
+    a generic message and the installation adds the repository itself.
+    """
+    code, out, _ = run(
+        ["zypper", "-n", "se", "-s", "-t", "package",
+         "nvidia-open-driver-G0*-signed-kmp-default"],
+        timeout=60,
+    )
+    if code != 0:
+        return []
+    found: list[tuple[str, tuple[int, ...], str]] = []
+    for line in out.splitlines():
+        cols = [c.strip() for c in line.split("|")]
+        # zypper -s table: S | Name | Type | Version | Arch | Repository
+        if len(cols) >= 4 and cols[1].startswith("nvidia-open-driver"):
+            ver = cols[3].split("_")[0]  # "580.95.05_k6.12..." → "580.95.05"
+            key = tuple(int(x) for x in re.findall(r"\d+", ver))
+            found.append((cols[1], key, ver))
+    if not found:
+        return []
+    # Newest generation NUMERICALLY (G10 > G09), then by version — a plain
+    # string comparison of package names would sort "G10" below "G09"
+    def _gen_num(pkg_name: str) -> int:
+        m = re.search(r"-G(\d+)-", pkg_name)
+        return int(m.group(1)) if m else 0
+
+    name, _, ver = max(found, key=lambda f: (_gen_num(f[0]), f[1]))
+    return [{"pakiet": name, "wersja": ver, "zalecany": True}]
 
 
 def _nvidia_repo_latest(distro: DistroInfo, timeout: int = 15) -> str:

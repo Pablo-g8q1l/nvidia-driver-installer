@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 
 from PySide6.QtCore import Qt, QThread, Signal
@@ -259,7 +260,7 @@ class InstallPage(QWidget):
                 self.rb_repo.setChecked(True)
 
         # Default state of the open-modules checkbox depending on the GPU
-        turing = any(is_turing_or_newer(g.name) for g in gpus)
+        turing = any(is_turing_or_newer(g.name, g.pci_id) for g in gpus)
         self.chk_open.setChecked(turing)
 
         # NVK on plain Debian with RTX 50xx requires backports — a note by the
@@ -301,7 +302,7 @@ class InstallPage(QWidget):
         gpus = self._state.get("gpus", [])
         # The recommendation is computed for the first card (the most common case)
         rec = (
-            recommended_driver_info(gpus[0].name) if gpus
+            recommended_driver_info(gpus[0].name, gpus[0].pci_id) if gpus
             else {"arch": "", "legacy": None, "max_major": None}
         )
 
@@ -326,8 +327,9 @@ class InstallPage(QWidget):
                 # Old card — new branches don't support it
                 text += "  ⚠ " + tr("(nie obsługuje Twojej karty)")
             elif rec["max_major"] and major > rec["max_major"]:
-                # E.g. Maxwell/Pascal: branches newer than 580 may not support it
-                text += "  ⚠ " + tr("(może nie wspierać Twojej karty)")
+                # Maxwell/Pascal/Volta: branches newer than 580 dropped their
+                # support (official — 595.71.05 removed those architectures)
+                text += "  ⚠ " + tr("(nie obsługuje Twojej karty)")
             elif gpus and key == "production" and rec_index < 0:
                 text += "  ★ " + tr("(zalecana dla Twojej karty)")
                 rec_index = self.combo_run.count()
@@ -337,6 +339,12 @@ class InstallPage(QWidget):
             seria = ver.split(".")[0]
             text = f"{tr('Legacy')} {seria}.xx — {ver}"
             if rec["legacy"] == seria:
+                text += "  ★ " + tr("(zalecana dla Twojej karty)")
+                rec_index = self.combo_run.count()
+            elif rec["max_major"] and seria == str(rec["max_major"]):
+                # A series-capped card (Maxwell/Pascal/Volta ≤ 580): its branch
+                # lives on the legacy list since the 590/595 release — without
+                # this star such a card would get NO recommendation at all
                 text += "  ★ " + tr("(zalecana dla Twojej karty)")
                 rec_index = self.combo_run.count()
             self.combo_run.addItem(text, ver)
@@ -360,6 +368,10 @@ class InstallPage(QWidget):
         # Repository
         distro = self._state.get("distro")
         if repo_versions:
+            # Series ceiling of the detected card (Legacy 470/390/340 or
+            # Maxwell/Pascal/Volta ≤ 580) — repository entries above it get
+            # the same warning the .run list already shows
+            cap = int(rec["legacy"]) if rec["legacy"] else (rec["max_major"] or 0)
             if distro and distro.ubuntu_based and len(repo_versions) > 1:
                 # Kubuntu / Mint: the user selects the driver series from the list
                 self.lbl_repo_info.setText(tr("Dostępne wersje:"))
@@ -367,8 +379,11 @@ class InstallPage(QWidget):
                 self.combo_repo.clear()
                 for rv in repo_versions:
                     label = rv["pakiet"]
+                    m = re.search(r"\d+", rv["pakiet"])
                     if rv["zalecany"]:
                         label += " ★ " + tr("(zalecany)")
+                    elif cap and m and int(m.group(0)) > cap:
+                        label += "  ⚠ " + tr("(nie obsługuje Twojej karty)")
                     self.combo_repo.addItem(label, rv["pakiet"])
                     if rv["zalecany"]:
                         self.combo_repo.setCurrentIndex(self.combo_repo.count() - 1)
@@ -378,7 +393,7 @@ class InstallPage(QWidget):
                 # Plain Debian: package source selection. The Debian repo ends
                 # at series 550, so for RTX 50xx the official NVIDIA repository
                 # is recommended (and required).
-                blackwell = any(is_blackwell_or_newer(g.name) for g in gpus)
+                blackwell = any(is_blackwell_or_newer(g.name, g.pci_id) for g in gpus)
                 self.lbl_repo_info.setText(tr("Źródło pakietów:"))
                 self.combo_repo.setVisible(True)
                 self.combo_repo.clear()
@@ -387,8 +402,13 @@ class InstallPage(QWidget):
                     if src == "nvidia":
                         label = (tr("Repozytorium NVIDIA")
                                  + f" — {rv['pakiet']} ({rv['wersja']})")
+                        m = re.search(r"\b(\d{3})\b", str(rv.get("wersja", "")))
                         if blackwell:
                             label += "  ★ " + tr("(wymagane dla RTX 50xx)")
+                        elif cap and m and int(m.group(1)) > cap:
+                            # NVIDIA repo carries only the newest series —
+                            # too new for a series-capped card (e.g. Pascal)
+                            label += "  ⚠ " + tr("(nie obsługuje Twojej karty)")
                     else:
                         label = (tr("Repozytorium Debiana")
                                  + f" — {rv['pakiet']} ({rv['wersja']})")
@@ -401,9 +421,21 @@ class InstallPage(QWidget):
                         self.combo_repo.setCurrentIndex(self.combo_repo.count() - 1)
             else:
                 rv = repo_versions[0]
-                self.lbl_repo_info.setText(
-                    tr("Wykryta wersja:") + f" {rv['pakiet']} ({rv['wersja']})"
-                )
+                text = tr("Wykryta wersja:") + f" {rv['pakiet']} ({rv['wersja']})"
+                # Series-capped card (Maxwell/Pascal/Volta ≤ 580): the arch /
+                # fedora repository installs the newest driver, which dropped
+                # such cards — steer to .run with the recommended version.
+                # openSUSE excluded: the installer picks the right G0X
+                # generation from the card itself, regardless of the newest
+                # version shown here (_suse_generations).
+                if rec["max_major"] and distro and distro.family != "suse":
+                    m = re.search(r"\b(\d{3})\b", str(rv.get("wersja", "")))
+                    if m and int(m.group(1)) > rec["max_major"]:
+                        text += "\n⚠ " + tr(
+                            "Sterownik z repozytorium nie obsługuje już Twojej"
+                            " karty — użyj metody .run z zalecaną wersją."
+                        )
+                self.lbl_repo_info.setText(text)
         else:
             self.lbl_repo_info.setText(
                 tr("Nie udało się wykryć wersji w repozytorium.")
@@ -444,11 +476,22 @@ class InstallPage(QWidget):
                  if v.split(".")[0] == rec["legacy"]), "",
             )
         elif rec["max_major"]:
-            try:
-                if target and int(target.split(".")[0]) > rec["max_major"]:
-                    target = ""
-            except ValueError:
-                target = ""
+            # Series-capped card: compare with the newest release of ITS branch
+            # (580.xx still gets updates on the legacy list) — production above
+            # the cap must not be the target, but "no notice at all" would hide
+            # real 580.x updates from Maxwell/Pascal/Volta owners
+            cap = str(rec["max_major"])
+            target = next(
+                (v for v in run_versions.get("legacy", [])
+                 if v.split(".")[0] == cap), "",
+            )
+            if not target:
+                prod = run_versions.get("production") or ""
+                try:
+                    if prod and int(prod.split(".")[0]) <= rec["max_major"]:
+                        target = prod
+                except ValueError:
+                    pass
 
         if target and nvidia_versions.is_newer(target, installed):
             self.lbl_update.setText(
@@ -480,14 +523,14 @@ class InstallPage(QWidget):
         """Availability rules for open kernel modules for the current method."""
         gpus = self._state.get("gpus", [])
         distro = self._state.get("distro")
-        turing = any(is_turing_or_newer(g.name) for g in gpus)
+        turing = any(is_turing_or_newer(g.name, g.pci_id) for g in gpus)
 
         if self.rb_nvk.isChecked():
             # NVK is open by itself — the checkbox doesn't apply
             self.chk_open.setEnabled(False)
             self.chk_open.setToolTip(tr("NVK jest w całości open source."))
             return
-        if any(is_blackwell_or_newer(g.name) for g in gpus):
+        if any(is_blackwell_or_newer(g.name, g.pci_id) for g in gpus):
             # Blackwell (RTX 50xx+) works only with open modules —
             # proprietary modules don't support these cards, so we force the choice
             self.chk_open.setEnabled(False)
@@ -545,7 +588,7 @@ class InstallPage(QWidget):
             distro
             and distro.family == "debian"
             and not distro.ubuntu_based
-            and any(is_blackwell_or_newer(g.name) for g in gpus)
+            and any(is_blackwell_or_newer(g.name, g.pci_id) for g in gpus)
         )
 
     def _on_snapshot_toggled(self, checked: bool) -> None:
@@ -568,11 +611,14 @@ class InstallPage(QWidget):
             return
         method = self._selected_method()
 
+        gpus = self._state.get("gpus", [])
         opts = InstallOptions(method=method, distro=distro,
                               open_modules=self.chk_open.isChecked(),
                               boot_report=bool(self._cfg.get("boot_report", False)),
                               snapshot=(self.chk_snapshot.isVisible()
-                                        and self.chk_snapshot.isChecked()))
+                                        and self.chk_snapshot.isChecked()),
+                              gpu_name=(gpus[0].name if gpus else ""),
+                              gpu_pci_id=(gpus[0].pci_id if gpus else ""))
         opis = {
             "nvk": tr("NVK — sterownik open source (Mesa)"),
             "repo": tr("Repozytorium dystrybucji (zalecane)"),
@@ -616,7 +662,7 @@ class InstallPage(QWidget):
                 else:
                     opis += " — " + tr("repozytorium Debiana")
                     gpus = self._state.get("gpus", [])
-                    if any(is_blackwell_or_newer(g.name) for g in gpus):
+                    if any(is_blackwell_or_newer(g.name, g.pci_id) for g in gpus):
                         opis += "\n\n⚠ " + tr(
                             "Sterownik z repozytorium Debiana (seria 550) nie"
                             " obsługuje kart RTX 50xx — wybierz Repozytorium"

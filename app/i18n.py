@@ -145,7 +145,6 @@ _EN = {
         " administrator password, and a reboot is recommended afterwards.",
     "Rozpocząć instalację?": "Start the installation?",
     "(nie obsługuje Twojej karty)": "(does not support your card)",
-    "(może nie wspierać Twojej karty)": "(may not support your card)",
     "(zalecana dla Twojej karty)": "(recommended for your card)",
     "Architektura karty:": "Card architecture:",
     "Turing lub nowsza": "Turing or newer",
@@ -155,6 +154,10 @@ _EN = {
     " z zalecaną wersją.":
         "the newest repository driver may not support it. The safest"
         " option is the .run method with the recommended version.",
+    "Sterownik z repozytorium nie obsługuje już Twojej"
+    " karty — użyj metody .run z zalecaną wersją.":
+        "The repository driver no longer supports your card —"
+        " use the .run method with the recommended version.",
     "Potwierdzenie instalacji": "Installation confirmation",
     "Brak uprawnień": "No privileges",
     "W systemie nie ma ani pkexec, ani sudo. Zainstaluj"
@@ -218,6 +221,8 @@ _EN = {
         "Building the kernel module (akmods — may take a few minutes)",
     "Dodawanie oficjalnego repozytorium NVIDIA (cuda-keyring)":
         "Adding the official NVIDIA repository (cuda-keyring)",
+    "Dodawanie repozytorium NVIDIA (zypper)":
+        "Adding the NVIDIA repository (zypper)",
     "Instalacja firmware GPU (GSP — wymagany na kartach RTX)":
         "Installing GPU firmware (GSP — required on RTX cards)",
     "Instalacja nowszego jądra z backportów (wymagane dla RTX 50xx)":
@@ -231,6 +236,8 @@ _EN = {
     "Instalacja sterownika NVK / Mesa": "Installing the NVK / Mesa driver",
     "Instalacja sterownika z repozytorium (pełna aktualizacja systemu)":
         "Installing the driver from the repository (full system update)",
+    "Instalacja sterownika z repozytorium (zypper)":
+        "Installing the driver from the repository (zypper)",
     "Instalacja zależności do budowania modułu jądra":
         "Installing dependencies for building the kernel module",
     "Konfiguracja modprobe (blokada nouveau, modeset)":
@@ -346,6 +353,24 @@ _EN = {
     "nvidia-smi zwraca błąd:": "nvidia-smi returns an error:",
     "brak komunikatu": "no message",
     "Zgodność wersji sterownika": "Driver version consistency",
+    "Źródła sterownika": "Driver sources",
+    "Kontrola dotyczy tylko openSUSE": "The check applies to openSUSE only",
+    "Sterownik z jednego źródła": "Driver from a single source",
+    "Brak sterownika NVIDIA z repozytorium i z pliku .run":
+        "No NVIDIA driver from a repository or from a .run file",
+    "Sterownik z pliku .run ORAZ pakiety z repozytorium ({n}) —"
+    " moduł jądra i biblioteki mogą pochodzić z różnych wersji."
+    " Zostaw jedno źródło: nvidia-uninstall (usuwa .run) albo"
+    " zypper rm pakietów.":
+        "A .run driver AND repository packages ({n}) — the kernel module and"
+        " the libraries may come from different releases. Keep one source:"
+        " nvidia-uninstall (removes the .run one) or zypper rm the packages.",
+    "Pakiety nie są zablokowane — kolejna aktualizacja systemu"
+    " znów je zainstaluje.":
+        "The packages are not locked — the next system update will install"
+        " them again.",
+    "Blokada pakietów NVIDIA w zypperze (ochrona instalacji .run)":
+        "Locking the NVIDIA packages in zypper (protects the .run install)",
     "Moduł nvidia nieaktywny — pominięto": "nvidia module inactive — skipped",
     "Moduł jądra ({k}) ≠ biblioteki ({u}) — wymagany restart lub"
     " ponowna instalacja":
@@ -532,6 +557,14 @@ _EN = {
     "Instalacja firmware nouveau nie powiodła się":
         "Installing nouveau firmware failed",
     "Instalacja zależności nie powiodła się": "Installing dependencies failed",
+    "Dodawanie repozytorium NVIDIA nie powiodło się":
+        "Adding the NVIDIA repository failed",
+    "Odświeżanie repozytoriów nie powiodło się":
+        "Refreshing the repositories failed",
+    "Nie znaleziono pakietów sterownika NVIDIA w repozytoriach":
+        "No NVIDIA driver packages found in the repositories",
+    "Instalacja nagłówków jądra nie powiodła się":
+        "Installing the kernel headers failed",
     "Instalator NVIDIA zwrócił błąd — szczegóły w /var/log/nvidia-installer.log":
         "The NVIDIA installer returned an error — details in"
         " /var/log/nvidia-installer.log",

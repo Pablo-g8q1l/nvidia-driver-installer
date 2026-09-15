@@ -46,7 +46,8 @@ password once — the program takes care of the rest.
 |---|---|
 | Arch | Arch Linux, CachyOS, EndeavourOS |
 | Fedora | Fedora 44, Nobara 43 |
-| Debian | Debian 13, Kubuntu 26.04 LTS, Linux Mint 22.3 |
+| Debian | Debian 13, Kubuntu 26.04 LTS, Linux Mint 22.3, Pop!_OS 24.04 (COSMIC) |
+| openSUSE | Tumbleweed, Leap 16.0 |
 
 Each distribution passed the full test cycle (repository → NVK → .run → repository)
 on a GeForce RTX 5070 Ti. Other distributions from these families (Ubuntu, RHEL,
@@ -80,6 +81,12 @@ a progress window is shown while the environment is being prepared.
 On Debian / Kubuntu / Mint the `venv` and `ensurepip` modules ship in a
 separate `python3-venv` package; the script detects a missing package and
 offers to install it for you.
+
+> **COSMIC / GNOME:** these desktops do not execute files on double-click
+> in the file manager (the script opens in a text editor instead) — run the
+> program from a terminal the first time, as shown above. The script then
+> adds an application-menu shortcut, so every later launch is a single
+> click on any desktop environment.
 
 ---
 

@@ -46,7 +46,8 @@ przycisk, podajesz raz hasło administratora — resztą zajmuje się program.
 |---|---|
 | Arch | Arch Linux, CachyOS, EndeavourOS |
 | Fedora | Fedora 44, Nobara 43 |
-| Debian | Debian 13, Kubuntu 26.04 LTS, Linux Mint 22.3 |
+| Debian | Debian 13, Kubuntu 26.04 LTS, Linux Mint 22.3, Pop!_OS 24.04 (COSMIC) |
+| openSUSE | Tumbleweed, Leap 16.0 |
 
 Każda dystrybucja przeszła pełny cykl testowy (repozytorium → NVK → .run →
 repozytorium) na karcie GeForce RTX 5070 Ti. Inne dystrybucje z tych rodzin
@@ -80,6 +81,12 @@ przygotowywania środowiska pokazywane jest okno z postępem.
 
 Na Debianie / Kubuntu / Mint moduły `venv` i `ensurepip` są w osobnym pakiecie
 `python3-venv`; skrypt wykrywa jego brak i proponuje instalację.
+
+> **COSMIC / GNOME:** te środowiska nie uruchamiają plików wykonywalnych
+> dwuklikiem z menedżera plików (skrypt otwiera się w edytorze tekstu) —
+> pierwszy raz uruchom program z terminala jak wyżej. Skrypt doda wtedy
+> skrót w menu aplikacji i kolejne uruchomienia działają już jednym
+> kliknięciem, na każdym środowisku graficznym.
 
 ---
 

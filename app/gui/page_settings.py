@@ -12,7 +12,7 @@ from app import config
 from app.gui.theme import apply_theme
 from app.i18n import tr
 
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.1.0"
 
 
 class SettingsPage(QWidget):
@@ -83,7 +83,8 @@ class SettingsPage(QWidget):
             + tr("Obsługiwane rodziny dystrybucji:") + "<br>"
             "• Arch: Arch Linux, CachyOS, EndeavourOS<br>"
             "• Fedora: Fedora 44, Nobara 43<br>"
-            "• Debian: Debian, Kubuntu 26.04 LTS, Linux Mint 22.3<br><br>"
+            "• Debian: Debian, Kubuntu 26.04 LTS, Linux Mint 22.3, Pop!_OS 24.04 (COSMIC)<br>"
+            "• openSUSE: Tumbleweed, Leap 16.0<br><br>"
             + tr("Metody instalacji: NVK (Mesa), repozytorium dystrybucji,"
                  " plik .run z serwerów NVIDIA.")
         )

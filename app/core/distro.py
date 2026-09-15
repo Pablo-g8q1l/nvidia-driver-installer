@@ -6,6 +6,7 @@ the driver installation works the same way:
   - arch   → Arch Linux, CachyOS, EndeavourOS          (pacman, mkinitcpio/dracut)
   - fedora → Fedora 44, Nobara 43                      (dnf, dracut)
   - debian → Debian, Kubuntu 26.04 LTS, Mint 22.3      (apt, update-initramfs)
+  - suse   → openSUSE Tumbleweed, Leap                 (zypper, dracut)
 """
 from __future__ import annotations
 
@@ -29,6 +30,7 @@ INITRAMFS_CMD = {
     ),
     "fedora": "dracut -f --regenerate-all",
     "debian": "update-initramfs -u -k all",
+    "suse": "dracut -f --regenerate-all",
 }
 
 
@@ -77,6 +79,11 @@ def detect_distro() -> DistroInfo:
         family = "fedora"
     elif ids & {"debian", "ubuntu"}:
         family = "debian"
+    elif ids & {"suse", "opensuse", "opensuse-tumbleweed", "opensuse-leap"}:
+        # Tumbleweed: ID=opensuse-tumbleweed, ID_LIKE="opensuse suse";
+        # Leap: ID=opensuse-leap, ID_LIKE="suse opensuse" — the bare ids cover
+        # derivatives that only set ID_LIKE to the parent's full ID
+        family = "suse"
     else:
         family = ""
 

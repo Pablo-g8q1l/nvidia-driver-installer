@@ -30,7 +30,7 @@ except ImportError:
 
 from app.i18n import tr, tr_prefix
 
-from . import history, nvidia_versions, utils
+from . import gpu, history, nvidia_versions, utils
 from .distro import DistroInfo
 
 
@@ -47,6 +47,8 @@ class InstallOptions:
     use_backports: bool = False  # NVK on plain Debian with RTX 50xx
     boot_report: bool = False   # boot report service (opt-in from Settings)
     snapshot: bool = False      # Timeshift snapshot first (opt-in, install page)
+    gpu_name: str = ""          # detected card model — G0X generation pick on openSUSE
+    gpu_pci_id: str = ""        # PCI device ID (e.g. "2c05") — fallback when the name is generic
 
 
 # Runs a script supplied on standard input (the pkexec path).
@@ -91,6 +93,14 @@ true"""
 # initramfs cmdline — load errors on every boot. We only remove files whose
 # content actually forces nvidia modules (conditioned on system state, not the
 # distribution name); without such files the loop changes nothing.
+#
+# The same problem on the Debian side comes from /etc/initramfs-tools/modules:
+# the nvidia packages list the modules there so that they land in the initramfs.
+# Once the driver is gone the entries remain and every initramfs rebuild spits
+# out "could not get modinfo from 'nvidia'" plus libkmod errors, for each
+# installed kernel — Ubuntu 26.04 (dracut as the initramfs-tools backend),
+# 2026-08-11. Only whole lines with our four modules are removed, so entries
+# added by the user survive; without the file the step changes nothing.
 _REMOVE_MODPROBE_CONFIG = (
     "rm -f /etc/modprobe.d/blacklist-nouveau.conf"
     " /etc/modprobe.d/nvidia-modeset.conf"
@@ -104,6 +114,12 @@ _REMOVE_MODPROBE_CONFIG = (
     '    rm -f "$f"\n'
     "  fi\n"
     "done\n"
+    "MODLIST=/etc/initramfs-tools/modules\n"
+    "NVMOD='^[[:space:]]*nvidia(_drm|_modeset|_uvm)?([[:space:]].*)?$'\n"
+    'if [ -f "$MODLIST" ] && grep -qE "$NVMOD" "$MODLIST"; then\n'
+    '  echo "Removing NVIDIA module entries from $MODLIST"\n'
+    '  sed -i -E "/$NVMOD/d" "$MODLIST"\n'
+    "fi\n"
     "true"
 )
 
@@ -184,6 +200,143 @@ if [ -n "$AKMOD_V" ] \\
   dnf -y remove 'xorg-x11-drv-nvidia*' 2>/dev/null || true
 fi
 dnf -y install $PKGS || error "Instalacja pakietów nie powiodła się\""""
+
+# openSUSE: the driver generation (G06, G07, ...) changes over time — NVIDIA
+# retires architectures into legacy generations, so a hardcoded name would rot.
+# openSUSE driver generations (G0X) are driver BRANCHES with overlapping,
+# mutually exclusive card ranges — the newest generation present in the repo
+# is NOT automatically right for the card (G07 = Turing+ only; a Pascal card
+# offered G07 would get a driver that does not support it). The allowed list
+# is therefore computed from the DETECTED CARD's architecture (gpu.py) and
+# only then narrowed by repository availability, newest first. zypper's own
+# modalias autoselection (`zypper inr`) was verified on live Tumbleweed
+# 2026-07-15 and rejected: restricted to the NVIDIA repo it selects nothing
+# (the signed kmp lives in the OSS repo), and unrestricted it picks the older
+# G06 branch and drags in unrelated system recommends (snapper, btrfs tools).
+# Unrecognized card names are treated like new cards (by far the most common
+# case). Legacy architectures map 1:1 to their openSUSE generation
+# (470→G05, 390→G04, 340→G03); if the repo no longer ships it, the loop ends
+# in a clear error and such cards are steered to the legacy .run path anyway.
+def _suse_generations(gpu_name: str, gpu_pci_id: str = "") -> list[str]:
+    """G0X generations allowed for the detected card, newest first."""
+    if not gpu_name or gpu.is_turing_or_newer(gpu_name, gpu_pci_id):
+        return ["G09", "G08", "G07", "G06"]
+    info = gpu.recommended_driver_info(gpu_name, gpu_pci_id)
+    if info["max_major"] == 580:        # Maxwell/Pascal/Volta — G07+ excluded
+        return ["G06"]
+    legacy_gen = {"470": "G05", "390": "G04", "340": "G03"}.get(info["legacy"] or "")
+    if legacy_gen:
+        return [legacy_gen]
+    # A non-empty name with an UNRECOGNIZED architecture (e.g. the placeholder
+    # "NVIDIA (nieznany model, ID …)" when neither nvidia-smi nor vulkaninfo
+    # could name the card) — treat like a new card, same as the empty name:
+    # capping such a card at G06 would rot once cards outgrow the 580 branch.
+    return ["G09", "G08", "G07", "G06"]
+
+
+# openSUSE ships the driver packages with modalias supplements, so a plain
+# `zypper dup` INSTALLS them by itself the moment an NVIDIA card is present and
+# the NVIDIA repository is enabled (openSUSE-repos-*-NVIDIA enables it without
+# being asked). Next to a .run installation that is a trap: the packages land
+# beside it, the kmp is built only for the NEW kernel, while every library
+# symlink still points at the .run version. The module and userspace then come
+# from two different driver releases — EGL fails to initialize, the compositor
+# crashes in a loop and the machine boots to a black screen. Verified on live
+# Tumbleweed: .run 595.84 from July met packaged 580.178.04 from a September
+# `dup` (see the "Usuwanie sterownika z pliku .run" step, which only guards the
+# reverse order — our own repo installation).
+#
+# Locks are the openSUSE-sanctioned defence: a locked name is not pulled in by
+# supplements and not updated. They are set right after a successful .run
+# installation and lifted wherever we hand the card back to packages (repo
+# method, NVK) or wipe the driver. Patterns are name globs, so they also cover
+# generations that do not exist yet. libnvidia-egl-gbm1 / -egl-wayland1 are
+# deliberately NOT locked — they are independent projects, not tied to the
+# driver release, and locking them would block unrelated updates.
+_SUSE_LOCK_PATTERNS = "'nvidia*' 'libnvidia-gpucomp*' 'x11-video-nvidia*'"
+
+_SUSE_ADD_LOCKS = (
+    f"zypper -n al {_SUSE_LOCK_PATTERNS} >/dev/null 2>&1 || true\n"
+    'echo "NVIDIA packages locked in zypper — a system update will no longer'
+    ' install a second driver next to the .run one."\n'
+    'echo "To lift the lock: zypper rl \'nvidia*\' \'libnvidia-gpucomp*\''
+    ' \'x11-video-nvidia*\'"'
+)
+
+# Lifting a lock that was never set is not an error for us — hence `|| true`
+# and the silent output; without locks the step is a no-op.
+_SUSE_REMOVE_LOCKS = f"zypper -n rl {_SUSE_LOCK_PATTERNS} >/dev/null 2>&1 || true"
+
+
+# The generation comes from _suse_generations() (card architecture ceiling)
+# narrowed by the repository state, per the official SDB:NVIDIA_drivers
+# packaging: open kernel modules = nvidia-open-driver-G0X-signed-kmp-FLAVOR
+# (signed for Secure Boot; in the openSUSE OSS repo), proprietary =
+# nvidia-driver-G0X-kmp-FLAVOR (NVIDIA repo). Userspace for both:
+# nvidia-video-G0X + nvidia-compute-utils-G0X (--recommends pulls in the GL
+# libraries), and those live only in the NVIDIA repo.
+#
+# A generation is usable only when BOTH halves are present, and the two repos
+# are not in step: Leap 16.0 ships the G07 open kmp but no nvidia-video-G07
+# (userspace stops at G06), while on Tumbleweed the proprietary line stops at
+# G06 even though G07 userspace exists. Picking the generation from one half
+# alone therefore lands on a set that cannot be installed — hence one loop
+# that accepts a generation only when its userspace AND a matching kmp exist.
+#
+# The kmp suffix is the kernel flavor (the tail of `uname -r`): kmp-default
+# fits only kernel-default, and Tumbleweed also ships kernel-longterm, Leap
+# 16.1 kernel-rt, Leap 15.6 kernel-azure — each with its own kmp. Installing
+# kmp-default on such a system makes zypper drag in kernel-default instead of
+# building for the running kernel. The exact flavor is tried first, then
+# -kmp-meta (the variant SUSE recommends, which resolves the flavor itself but
+# can be ambiguous between the cuda and non-cuda kmp), then -kmp-default as a
+# last resort for an unusual flavor with no package of its own.
+def _suse_repo_install(open_modules: bool, generations: list[str]) -> str:
+    """zypper installation script: generation detection + the package set."""
+    if open_modules:
+        prefix, kmp_infix = "nvidia-open-driver", "signed-kmp"
+        conflict = "'^nvidia-driver-G0[0-9]+-kmp'"
+    else:
+        prefix, kmp_infix = "nvidia-driver", "kmp"
+        conflict = "'^nvidia-open-driver-'"
+    kmp_candidates = " ".join(
+        f'"{prefix}-$g-{kmp_infix}-{suffix}"'
+        for suffix in ("${FLAVOR}", "meta", "default")
+    )
+    return (
+        # flavor of the RUNNING kernel: "6.17.4-1-default" -> "default"
+        'FLAVOR="$(uname -r)"; FLAVOR="${FLAVOR##*-}"\n'
+        'GEN=""; KMP=""\n'
+        f"for g in {' '.join(generations)}; do\n"
+        # no userspace for this generation in the NVIDIA repo = unusable
+        '  zypper -n se -x -t package "nvidia-video-$g" >/dev/null 2>&1'
+        " || continue\n"
+        f"  for k in {kmp_candidates}; do\n"
+        '    if zypper -n se -x -t package "$k" >/dev/null 2>&1; then\n'
+        '      GEN="$g"; KMP="$k"; break 2\n'
+        "    fi\n"
+        "  done\n"
+        "done\n"
+        '[ -n "$GEN" ] || error "Nie znaleziono pakietów sterownika NVIDIA w repozytoriach"\n'
+        'echo "Detected driver generation: $GEN (kernel flavor: $FLAVOR)"\n'
+        'echo "Kernel module package: $KMP"\n'
+        # a leftover kernel module of the other flavor conflicts with the new
+        # one (same files); on a system without it xargs gets nothing = no-op.
+        # --qf '%{NAME}': zypper takes a capability (NAME[.ARCH][OP EDITION]),
+        # so a bare `rpm -qa` line ("nvidia-video-G07-595.99.02-1.1.x86_64")
+        # matches no package and the removal silently does nothing
+        "rpm -qa --qf '%{NAME}\\n' | grep -E "
+        f"{conflict} | xargs -r zypper -n rm || true\n"
+        # NVIDIA userspace packages carry an EULA; in non-interactive mode
+        # zypper answers the license prompt with its default "No" and aborts —
+        # the flag accepts it, exactly as zypper's own abort message instructs
+        # (live Tumbleweed, 2026-07-15)
+        'zypper -n in --auto-agree-with-licenses --recommends'
+        ' "$KMP" "nvidia-video-${GEN}"'
+        ' "nvidia-compute-utils-${GEN}"'
+        ' || error "Instalacja pakietów nie powiodła się"'
+    )
+
 
 # Kernel built with Clang and LTO (e.g. CachyOS with ThinLTO): the .run
 # installer's own module build compiles LLVM bitcode (it detects CC itself from
@@ -404,6 +557,25 @@ def _removal_commands(family: str) -> str:
         return common + (
             "dnf -y remove '*nvidia*' --exclude='nvidia-gpu-firmware' || true\ntrue"
         )
+    if family == "suse":
+        # Package list per the official openSUSE removal procedure, extended
+        # with x11-video-nvidiaG0X — the userspace name of the old G04/G05
+        # generations, which does not start with "nvidia". zypper rm
+        # additionally cleans up dependencies. kernel-firmware-nvidia (nouveau
+        # GSP firmware) matches none of the patterns, so it stays installed.
+        # --qf '%{NAME}': zypper takes a capability (NAME[.ARCH][OP EDITION]),
+        # never a whole rpm -qa line with version and architecture glued on —
+        # those match no package and the removal silently does nothing.
+        return common + (
+            # a lock from an earlier .run installation blocks the removal of
+            # the very packages it covers — lift it first, and do not leave it
+            # behind on a system that no longer has the driver
+            _SUSE_REMOVE_LOCKS + "\n"
+            "rpm -qa --qf '%{NAME}\\n'"
+            " | grep -E '^(nvidia|libnvidia|x11-video-nvidia)'"
+            " | grep -v container"
+            " | xargs -r zypper -n rm || true\ntrue"
+        )
     # debian / ubuntu / mint
     return common + (
         "dpkg -l | awk '/^ii/ && $2 ~ /nvidia/ {print $2}' | grep -v firmware"
@@ -437,7 +609,11 @@ def _steps_repo(opts: InstallOptions, keyring: str = "") -> list[tuple[str, str]
     steps.append((
         "Usuwanie sterownika z pliku .run (jeśli obecny)",
         "if [ -x /usr/bin/nvidia-uninstall ]; then"
-        " nvidia-uninstall --silent || true; fi\ntrue",
+        " nvidia-uninstall --silent || true; fi\n"
+        # a lock left by an earlier .run installation would make the packages
+        # below uninstallable — the card goes back to packages, so it goes
+        + (_SUSE_REMOVE_LOCKS + "\n" if fam == "suse" else "")
+        + "true",
     ))
 
     if fam == "arch":
@@ -489,6 +665,42 @@ def _steps_repo(opts: InstallOptions, keyring: str = "") -> list[tuple[str, str]
         steps.append((
             "Budowanie modułu jądra (akmods — może potrwać kilka minut)",
             'akmods --force || error "Budowanie modułu jądra nie powiodło się"',
+        ))
+
+    elif fam == "suse":
+        # The official NVIDIA repository provides the userspace packages
+        # (nvidia-video-G0X); added only when no repo points at it yet —
+        # a system with the repo already configured is left untouched.
+        repo_url = nvidia_versions.suse_repo_url(opts.distro)
+        steps.append((
+            "Dodawanie repozytorium NVIDIA (zypper)",
+            # Three states, not two: the repository can be missing, present and
+            # enabled, or present but DISABLED. `zypper lr` lists disabled ones
+            # too, so testing for the URL alone would treat a disabled repo as
+            # ready — and the installation would then fail on packages nothing
+            # provides. A disabled NVIDIA repo is a real setup: it is what you
+            # switch off to keep a system update from pulling the driver in by
+            # itself (openSUSE installs it via modalias supplements).
+            'NV_ALIAS="$(zypper -n lr -u 2>/dev/null'
+            " | awk -F'|' '/download\\.nvidia\\.com\\/opensuse/"
+            ' {gsub(/^ +| +$/,"",$2); print $2; exit}\')"\n'
+            'if [ -z "$NV_ALIAS" ]; then\n'
+            f"  zypper -n ar -f '{repo_url}' NVIDIA"
+            ' || error "Dodawanie repozytorium NVIDIA nie powiodło się"\n'
+            "elif ! zypper -n lr -u -E 2>/dev/null"
+            " | grep -q 'download.nvidia.com/opensuse'; then\n"
+            '  echo "The NVIDIA repository is disabled — enabling it ($NV_ALIAS)"\n'
+            '  zypper -n mr -e "$NV_ALIAS"'
+            ' || error "Włączenie repozytorium NVIDIA nie powiodło się"\n'
+            "fi\n"
+            "zypper -n --gpg-auto-import-keys refresh"
+            ' || error "Odświeżanie repozytoriów nie powiodło się"',
+        ))
+        steps.append((
+            "Instalacja sterownika z repozytorium (zypper)",
+            _suse_repo_install(opts.open_modules,
+                               _suse_generations(opts.gpu_name,
+                                                 opts.gpu_pci_id)),
         ))
 
     else:  # debian family
@@ -570,6 +782,25 @@ def _steps_nvk(opts: InstallOptions) -> list[tuple[str, str]]:
         firmware = (
             "dnf -y install nvidia-gpu-firmware"
             ' || error "Instalacja pakietu nvidia-gpu-firmware nie powiodła się"'
+        )
+    elif fam == "suse":
+        # The NVK Vulkan driver (libvulkan_nouveau) exists in Tumbleweed;
+        # older Leap releases ship a Mesa without it — then only the warning
+        # fires and the desktop still runs on nouveau OpenGL.
+        install = (
+            "zypper -n in Mesa Mesa-dri libvulkan1 vulkan-tools"
+            ' || error "Instalacja pakietów Mesa nie powiodła się"\n'
+            "if zypper -n se -x -t package libvulkan_nouveau >/dev/null 2>&1; then\n"
+            "  zypper -n in libvulkan_nouveau"
+            ' || error "Instalacja pakietu nie powiodła się (libvulkan_nouveau)"\n'
+            "else\n"
+            '  echo "WARNING: the libvulkan_nouveau (NVK) package is not available'
+            ' in the repositories — only OpenGL (nouveau) will work"\n'
+            "fi"
+        )
+        firmware = (
+            "zypper -n in kernel-firmware-nvidia"
+            ' || error "Instalacja pakietu nie powiodła się (kernel-firmware-nvidia)"'
         )
     elif opts.use_backports and not opts.distro.ubuntu_based:
         # Plain Debian with an RTX 50xx (Blackwell) card: the stable release is
@@ -654,6 +885,29 @@ def _steps_run(opts: InstallOptions, runfile: str) -> list[tuple[str, str]]:
             " libglvnd-devel libglvnd-glx libglvnd-opengl"
             ' || error "Instalacja zależności nie powiodła się"'
         )
+    elif fam == "suse":
+        # Kernel headers match the running kernel's flavor (default / longterm
+        # etc. — the suffix of uname -r). dkms is missing from some Leap
+        # releases' repositories: then the .run installer builds the module
+        # only for the running kernel (NV_DKMS_FLAG stays empty) instead of
+        # failing the whole installation; _DKMS_ALL_KERNELS degrades to
+        # warnings the same way.
+        deps = (
+            "zypper -n --gpg-auto-import-keys refresh || true\n"
+            "zypper -n in gcc make libglvnd-devel pkg-config"
+            ' || error "Instalacja zależności nie powiodła się"\n'
+            'FLAVOR="$(uname -r)"; FLAVOR="${FLAVOR##*-}"\n'
+            'zypper -n in "kernel-${FLAVOR}-devel"'
+            " || zypper -n in kernel-default-devel"
+            ' || error "Instalacja nagłówków jądra nie powiodła się"\n'
+            'NV_DKMS_FLAG="--dkms"\n'
+            "command -v dkms >/dev/null 2>&1 || zypper -n in dkms || true\n"
+            "if ! command -v dkms >/dev/null 2>&1; then\n"
+            '  echo "WARNING: the dkms package is unavailable — the module will'
+            ' be built only for the running kernel"\n'
+            '  NV_DKMS_FLAG=""\n'
+            "fi"
+        )
     else:
         deps = (
             'apt-get update || error "apt-get update nie powiodło się"\n'
@@ -666,6 +920,9 @@ def _steps_run(opts: InstallOptions, runfile: str) -> list[tuple[str, str]]:
     open_flag = (
         nvidia_versions.open_module_flag(opts.run_version) if opts.open_modules else ""
     )
+    # suse: --dkms only when dkms is actually available (the deps step above
+    # sets NV_DKMS_FLAG); other families keep the literal flag — plans unchanged
+    dkms_flag = "$NV_DKMS_FLAG" if fam == "suse" else "--dkms"
     # A loaded nvidia module (.run installation with the driver running,
     # e.g. changing the version from a repository driver): the 595.84 installer
     # then asks to skip the check and in --silent mode ABORTS by default
@@ -698,11 +955,17 @@ def _steps_run(opts: InstallOptions, runfile: str) -> list[tuple[str, str]]:
             # the trial module load, which would fail. The nouveau blacklist is
             # already written, so after a restart nvidia will claim the card.
             _LLVM_KERNEL_ENV + "\n" + allow_running + "\n"
-            f'env $NV_TOOLCHAIN_ENV sh "{runfile}" --silent --accept-license --dkms --no-x-check'
+            f'env $NV_TOOLCHAIN_ENV sh "{runfile}" --silent --accept-license {dkms_flag} --no-x-check'
             f' --no-nouveau-check --skip-module-load $NV_ALLOW_RUNNING{open_flag}'
             ' || error "Instalator NVIDIA zwrócił błąd — szczegóły w /var/log/nvidia-installer.log"',
         ),
         ("Budowanie modułu DKMS dla pozostałych jąder", _DKMS_ALL_KERNELS),
+    ] + ([(
+        # only openSUSE pulls the driver in by itself on an update — see the
+        # comment at _SUSE_LOCK_PATTERNS
+        "Blokada pakietów NVIDIA w zypperze (ochrona instalacji .run)",
+        _SUSE_ADD_LOCKS,
+    )] if fam == "suse" else []) + [
         _initramfs_step(opts.distro),
     ]
 
