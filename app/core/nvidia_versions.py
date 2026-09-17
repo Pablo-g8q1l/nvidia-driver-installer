@@ -377,6 +377,32 @@ def _debian_repo_versions(distro: DistroInfo) -> list[dict]:
     ]
 
 
+def _apt_candidates(pakiety: list[str]) -> dict[str, str]:
+    """Candidate versions of the given packages — one apt-cache policy call.
+
+    Returns {package: "580.178.04"} — the full driver version, the same kind
+    of number the .run and NVK methods show. Packages without a candidate
+    (none available) are simply missing from the result.
+    """
+    if not pakiety:
+        return {}
+    code, out, _ = run(["apt-cache", "policy", *pakiety], timeout=60)
+    if code != 0:
+        return {}
+    wersje: dict[str, str] = {}
+    biezacy = ""
+    for linia in out.splitlines():
+        # Package header: at column 0, ends with a colon ("nvidia-driver-580:")
+        if linia[:1] not in (" ", "\t", "") and linia.rstrip().endswith(":"):
+            biezacy = linia.rstrip()[:-1]
+            continue
+        m = re.match(r"\s+(?:Candidate|Kandydująca)\s*:\s*(\S+)", linia)
+        # No candidate is "(none)" / "(brak)" — depending on the system language
+        if biezacy and m and not m.group(1).startswith("("):
+            wersje[biezacy] = _czysta_wersja(m.group(1))
+    return wersje
+
+
 def _ubuntu_repo_versions() -> list[dict]:
     """Kubuntu/Mint: list of nvidia-driver-XXX packages + the one recommended by ubuntu-drivers."""
     # Package recommended by the ubuntu-drivers tool (if available)
@@ -399,13 +425,22 @@ def _ubuntu_repo_versions() -> list[dict]:
         # Sort: newest series first, regular variant before -open
         key=lambda p: (-int(re.search(r"\d+", p).group(0)), p.endswith("-open")),
     )
+    # Full driver version of every metapackage — the series in the name says
+    # nothing about what actually gets installed (transitional packages point
+    # at a newer driver: nvidia-driver-535 → 580.178.04), and the other
+    # families already show a real version here.
+    kandydaci = _apt_candidates(pkgs)
     wyniki = []
     for p in pkgs:
         seria = re.search(r"\d+", p).group(0)
+        # Fallback only when apt has no candidate — the label stays usable
+        wersja = kandydaci.get(p) or (
+            f"seria {seria}" + (" (open)" if p.endswith("-open") else "")
+        )
         wyniki.append(
             {
                 "pakiet": p,
-                "wersja": f"seria {seria}" + (" (open)" if p.endswith("-open") else ""),
+                "wersja": wersja,
                 "zalecany": p == recommended,
             }
         )

@@ -378,8 +378,17 @@ class InstallPage(QWidget):
                 self.combo_repo.setVisible(True)
                 self.combo_repo.clear()
                 for rv in repo_versions:
-                    label = rv["pakiet"]
-                    m = re.search(r"\d+", rv["pakiet"])
+                    wersja = str(rv.get("wersja", ""))
+                    # Full driver version next to the package name, the same
+                    # way the .run branches and NVK show theirs — the series
+                    # in the package name can differ from what is installed
+                    # (transitional metapackages point at a newer driver)
+                    pelna = re.match(r"\d+\.\d", wersja) is not None
+                    label = (f"{rv['pakiet']} — {wersja}" if pelna
+                             else rv["pakiet"])
+                    # Card-support checks follow the version actually
+                    # installed, falling back to the series in the name
+                    m = re.search(r"\d+", wersja if pelna else rv["pakiet"])
                     if rv["zalecany"]:
                         label += " ★ " + tr("(zalecany)")
                     elif cap and m and int(m.group(0)) > cap:
